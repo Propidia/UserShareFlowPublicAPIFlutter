@@ -31,31 +31,31 @@ class ApiTestRunner {
     return {'ok': true, 'controls': form.controls.length};
   }
 
-  static Future<Map<String, dynamic>> testConnectedOptions({
-    required int formId,
-    required int controlId,
-  }) async {
-    final res = await ApiClient.instance.getConnectedOptions(
-      ConnectedOptionsRequest(
-        formId: formId,
-        controlId: controlId,
-        pageSize: 500,
-      ),
-    );
-    await JsonSaver.saveJson('GetConnectedOptions_${formId}_$controlId.json', {
-      'schema': res.schema,
-      'items': res.items
-          .map(
-            (e) => {
-              'value': e.value,
-              'label': e.label,
-              'display': e.display,
-              'fks': e.fks,
-            },
-          )
-          .toList(),
-      'pagination': res.pagination,
-    });
-    return {'ok': true, 'items': res.items.length, 'schema': res.schema};
-  }
+  // static Future<Map<String, dynamic>> testConnectedOptions({
+  //   required int formId,
+  //   required int controlId,
+  // }) async {
+  //   final res = await ApiClient.instance.getConnectedOptions(
+  //     ConnectedOptionsRequest(
+  //       table_id: formId,
+  //       controlId: controlId,
+  //       pageSize: 500,
+  //     ),
+  //   );
+  //   await JsonSaver.saveJson('GetConnectedOptions_${formId}_$controlId.json', {
+  //     'schema': res.schema,
+  //     'items': res.items
+  //         .map(
+  //           (e) => {
+  //             'value': e.value,
+  //             'label': e.label,
+  //             'display': e.display,
+  //             'fks': e.fks,
+  //           },
+  //         )
+  //         .toList(),
+  //     'pagination': res.pagination,
+  //   });
+  //   return {'ok': true, 'items': res.items.length, 'schema': res.schema};
+  // }
 }

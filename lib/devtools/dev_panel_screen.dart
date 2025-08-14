@@ -70,19 +70,19 @@ class _DevPanelScreenState extends State<DevPanelScreen> {
                       ? null
                       : () async {
                           setState(() => busy = true);
-                          try {
-                            final r = await ApiTestRunner.testConnectedOptions(
-                              formId: 2566,
-                              controlId: 2,
-                            );
-                            _append(
-                              'ConnectedOptions 2566/2 ok, items=${r['items']}',
-                            );
-                          } catch (e) {
-                            _append('ConnectedOptions error: $e');
-                          } finally {
-                            setState(() => busy = false);
-                          }
+                          // try {
+                          //   final r = await ApiTestRunner.testConnectedOptions(
+                          //     formId: 2566,
+                          //     controlId: 2,
+                          //   );
+                          //   _append(
+                          //     'ConnectedOptions 2566/2 ok, items=${r['items']}',
+                          //   );
+                          // } catch (e) {
+                          //   _append('ConnectedOptions error: $e');
+                          // } finally {
+                          //   setState(() => busy = false);
+                          // }
                         },
                   child: const Text('Test Connected (2566,c2)'),
                 ),

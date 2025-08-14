@@ -77,8 +77,9 @@ class ControlModel {
               (json['value'] as Map).keys.map((e) => e.toString()),
             )
           : <String>[],
-      meta: json['meta'] is Map<String, dynamic>
-          ? json['meta'] as Map<String, dynamic>
+      // نستخدم التحويل إلى Map<String, dynamic> لضمان قبول الخرائط ذات النوع الديناميكي
+      meta: json['meta'] is Map
+          ? Map<String, dynamic>.from(json['meta'] as Map)
           : null,
       children: parsedChildren,
     );
@@ -116,72 +117,111 @@ class ControlModel {
   }
 }
 
-class ConnectedOptionItem {
-  final dynamic value;
-  final String label;
-  final Map<String, dynamic> display;
-  final Map<String, dynamic> fks;
-  final Map<String, dynamic> controls;
-
-  ConnectedOptionItem({
-    required this.value,
-    required this.label,
-    required this.display,
-    required this.fks,
-    required this.controls,
-  });
-
-  factory ConnectedOptionItem.fromJson(Map<String, dynamic> json) {
-    return ConnectedOptionItem(
-      value: json['value'],
-      label: (json['label']?.toString().isNotEmpty ?? false)
-          ? json['label'].toString()
-          // fallback: إن لم يوجد label جرّب أول display
-          : _firstDisplay(json) ?? '',
-      display: Map<String, dynamic>.from(json['display'] ?? {}),
-      fks: Map<String, dynamic>.from(json['fks'] ?? {}),
-      controls: Map<String, dynamic>.from(json['controls'] ?? {}),
-    );
-  }
-
-  static String? _firstDisplay(Map<String, dynamic> json) {
-    final d = json['display'];
-    if (d is Map && d.isNotEmpty) {
-      final first = d.entries.first;
-      return first.value?.toString();
+extension ControlModelMetaExt on ControlModel {
+  /// يعيد قسم connected من meta إن وُجد
+  Map<String, dynamic>? get connectedMeta {
+    final m = meta;
+    if (m == null) return null;
+    final dynamic c = m['connected'];
+    if (c is Map) {
+      return Map<String, dynamic>.from(c);
     }
     return null;
   }
-}
 
-class ConnectedOptionsResponse {
-  final int formId;
-  final int controlId;
-  final int tableId;
-  final Map<String, dynamic> schema;
-  final List<ConnectedOptionItem> items;
-  final Map<String, dynamic> pagination;
-
-  ConnectedOptionsResponse({
-    required this.formId,
-    required this.controlId,
-    required this.tableId,
-    required this.schema,
-    required this.items,
-    required this.pagination,
-  });
-
-  factory ConnectedOptionsResponse.fromJson(Map<String, dynamic> json) {
-    final List<dynamic> its = json['items'] ?? [];
-    return ConnectedOptionsResponse(
-      formId: json['form_id'] as int,
-      controlId: json['control_id'] as int,
-      tableId: json['table_id'] as int,
-      schema: Map<String, dynamic>.from(json['schema'] ?? {}),
-      items: its
-          .map((e) => ConnectedOptionItem.fromJson(e as Map<String, dynamic>))
-          .toList(),
-      pagination: Map<String, dynamic>.from(json['pagination'] ?? {}),
-    );
+  /// يعيد قسم quick_usage من meta إن وُجد
+  Map<String, dynamic>? get quickUsageMeta {
+    final m = meta;
+    if (m == null) return null;
+    final dynamic q = m['quick_usage'];
+    if (q is Map) {
+      return Map<String, dynamic>.from(q);
+    }
+    return null;
   }
+
+  /// أسماء الحقول الافتراضية من meta.connected.fields_default.by_name إن وُجدت
+  List<String> get defaultFieldNames {
+    final c = connectedMeta;
+    if (c == null) return const <String>[];
+    final dynamic fieldsDefault = c['fields_default'];
+    if (fieldsDefault is Map) {
+      final dynamic byName = fieldsDefault['by_name'];
+      if (byName is List) {
+        return byName.map((e) => e.toString()).toList();
+      }
+    }
+    return const <String>[];
+  }
+
+  /// هل الأداة من نوع أداة ربط
+  bool get isConnectedType => type == 16;
 }
+
+// class ConnectedOptionItem {
+//   final dynamic value;
+//   final String label;
+//   final Map<String, dynamic> display;
+//   final Map<String, dynamic> fks;
+//   final Map<String, dynamic> controls;
+
+//   ConnectedOptionItem({
+//     required this.value,
+//     required this.label,
+//     required this.display,
+//     required this.fks,
+//     required this.controls,
+//   });
+
+//   factory ConnectedOptionItem.fromJson(Map<String, dynamic> json) {
+//     return ConnectedOptionItem(
+//       value: json['value'],
+//       label: (json['label']?.toString().isNotEmpty ?? false)
+//           ? json['label'].toString()
+//           // fallback: إن لم يوجد label جرّب أول display
+//           : _firstDisplay(json) ?? '',
+//       display: Map<String, dynamic>.from(json['display'] ?? {}),
+//       fks: Map<String, dynamic>.from(json['fks'] ?? {}),
+//       controls: Map<String, dynamic>.from(json['controls'] ?? {}),
+//     );
+//   }
+
+//   static String? _firstDisplay(Map<String, dynamic> json) {
+//     final d = json['display'];
+//     if (d is Map && d.isNotEmpty) {
+//       final first = d.entries.first;
+//       return first.value?.toString();
+//     }
+//     return null;
+//   }
+// }
+
+// class ConnectedOptionsResponse {
+//   final int formId;
+//   final int controlId;
+//   final int tableId;
+//   final Map<String, dynamic> schema;
+//   final List<dynamic> items;
+//   final Map<String, dynamic> pagination;
+
+//   ConnectedOptionsResponse({
+//     required this.formId,
+//     required this.controlId,
+//     required this.tableId,
+//     required this.schema,
+//     required this.items,
+//     required this.pagination,
+//   });
+
+//   factory ConnectedOptionsResponse.fromJson(Map<String, dynamic> json) {
+//     final List<dynamic> its = json['data'] ?? [];
+//     return ConnectedOptionsResponse(
+//       formId: json['form_id'] as int,
+//       controlId: json['control_id'] as int,
+//       tableId: json['table_id'] as int,
+//       schema: Map<String, dynamic>.from(json['schema'] ?? {}),
+//       items: its,
+//       pagination: Map<String, dynamic>.from(json['pagination'] ?? {}),
+//     );
+//   }
+// }

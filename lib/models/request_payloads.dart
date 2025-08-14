@@ -1,9 +1,9 @@
 import 'dart:convert';
 
 class ConnectedOptionsRequest {
-  final int formId;
+  final int table_id;
   final int controlId;
-  final int page;
+  final Map<String, dynamic> flitter;
   final int pageSize;
   final String fields; // default
   final String order;
@@ -12,9 +12,9 @@ class ConnectedOptionsRequest {
   final Map<String, dynamic> controlValues;
 
   ConnectedOptionsRequest({
-    required this.formId,
+    required this.table_id,
     required this.controlId,
-    this.page = 1,
+    this.flitter = const {},
     this.pageSize = 50,
     this.fields = 'default',
     this.order = '',
@@ -25,14 +25,14 @@ class ConnectedOptionsRequest {
 
   Map<String, String> toQuery() {
     return {
-      'form_id': formId.toString(),
-      'control_id': controlId.toString(),
-      'page': page.toString(),
+      'table_id': table_id.toString(),
+      'connected_control_id': controlId.toString(),
+      'filters': jsonEncode(flitter),
       'page_size': pageSize.toString(),
       'fields': fields,
       if (order.isNotEmpty) 'order': order,
       if (q.isNotEmpty) 'q': q,
-      if (extraFilters.isNotEmpty) 'extra_filters': jsonEncode(extraFilters),
+      if (extraFilters.isNotEmpty) 'filters': jsonEncode(extraFilters),
       if (controlValues.isNotEmpty) 'control_values': jsonEncode(controlValues),
     };
   }

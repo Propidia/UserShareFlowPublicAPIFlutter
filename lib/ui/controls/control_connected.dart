@@ -17,108 +17,115 @@ class ConnectedControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // استخراج الاعتمادية من meta.placeholders
+    // استخراج الاعتمادية من meta
+    // 1) الصيغة الجديدة: meta.quick_usage.get_data_form.params.filtersDepends
+    // 2) fallback للصيغة القديمة: meta.filters.placeholders
     final requiredControls = <int>[];
-    final meta = control.meta;
-    if (meta is Map) {
-      final filters = (meta as Map)['filters'];
-      List<dynamic> placeholders = const [];
-      if (filters is Map) {
-        final phs = filters['placeholders'];
-        if (phs is List) {
-          placeholders = phs;
-        }
-      }
-      for (final p in placeholders) {
-        if (p is Map && p['required'] == true && p['control_id'] is int) {
-          requiredControls.add(p['control_id'] as int);
+    // final meta = control.meta; // غير مستخدم حالياً
+    final quick = control.quickUsageMeta;
+    if (quick != null) {
+      final dynamic getDataForm = quick['get_data_form'];
+      if (getDataForm is Map) {
+        final dynamic params = getDataForm['params'];
+        if (params is Map) {
+          final dynamic filtersDepends = params['filtersDepends'];
+          if (filtersDepends is List) {
+            for (final dep in filtersDepends) {
+              if (dep is Map && dep['control_id'] is int) {
+                requiredControls.add(dep['control_id'] as int);
+              }
+            }
+            // تسجيل الاعتمادية في المتحكم العام للنموذج حتى يمكن قفل الحقول عندما تُختار قيمة في أداة الربط
+            controller.registerConnectedDependencies(control.id, requiredControls);
+          }
         }
       }
     }
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: Obx(() {
-              final currentText =
-                  controller.values[control.id]?.toString() ?? '';
-              // عرض قيمة مختصرة للأداة إذا كانت من نوع connected
-              final display = () {
-                if (currentText.isEmpty) return '';
-                // currentText قد يكون JSON لكائن {value, keys, label, display}
-                if (currentText.startsWith('{') && currentText.endsWith('}')) {
-                  try {
-                    final obj = jsonDecode(currentText);
-                    if (obj is Map) {
-                      if (obj['label'] != null &&
-                          obj['label'].toString().trim().isNotEmpty) {
-                        return obj['label'].toString();
-                      }
-                      if (obj['display'] is Map &&
-                          (obj['display'] as Map).isNotEmpty) {
-                        final first = (obj['display'] as Map).entries.first;
-                        return first.value?.toString() ?? currentText;
-                      }
-                      if (obj['value'] != null) return obj['value'].toString();
-                    }
-                  } catch (_) {}
-                }
-                return currentText;
-              }();
-              return TextFormField(
+    // الصيغة القديمة إن لم نجد اعتمادات في الصيغة الجديدة
+    // if (requiredControls.isEmpty && meta is Map) {
+    //   final filters = (meta as Map)['filters'];
+    //   List<dynamic> placeholders = const [];
+    //   if (filters is Map) {
+    //     final phs = filters['placeholders'];
+    //     if (phs is List) {
+    //       placeholders = phs;
+    //     }
+    //   }
+    //   for (final p in placeholders) {
+    //     if (p is Map && p['required'] == true && p['control_id'] is int) {
+    //       requiredControls.add(p['control_id'] as int);
+    //     }
+    //   }
+    // }
+    return Obx(() {
+      final currentText = controller.values[control.id]?.toString() ?? '';
+      final display = currentText;
+      final missing = <int>[];
+      for (final depId in requiredControls) {
+        final v = controller.values[depId];
+        if (v == null || v.toString().trim().isEmpty) {
+          missing.add(depId);
+        }
+      }
+      final bool canChange = controller.canChangeValue(control.id);
+      final bool isLocked = missing.isNotEmpty || !canChange;
+
+      if (isLocked) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(control.name + (control.requiredField ? ' *' : '')),
+              const SizedBox(height: 6),
+              Text(display),
+            ],
+          ),
+        );
+      }
+
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: TextFormField(
                 readOnly: true,
                 decoration: InputDecoration(
                   labelText: control.name + (control.requiredField ? ' *' : ''),
                   border: const OutlineInputBorder(),
                 ),
                 controller: TextEditingController(text: display),
-              );
-            }),
-          ),
-          const SizedBox(width: 8),
-          ElevatedButton(
-            onPressed: () async {
-              // التحقق من الاعتمادية: جميع الحقول المطلوبة يجب أن تكون مملوءة
-              final missing = <int>[];
-              for (final depId in requiredControls) {
-                final v = controller.values[depId];
-                if (v == null || v.toString().trim().isEmpty) {
-                  missing.add(depId);
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: () async {
+                final selected = await showDialog<Map<String, dynamic>>(
+                  context: context,
+                  builder: (_) => _ConnectedOptionsDialog(
+                    control: control,
+                    formId: controller.currentForm.value!.id,
+                    controller: controller,
+                  ),
+                );
+                if (selected != null) {
+                  controller.setValue(control.id, jsonEncode(selected));
                 }
-              }
-              if (missing.isNotEmpty) {
-                Get.snackbar(
-                  'تنبيه',
-                  'لا يمكن فتح أداة الربط قبل تعبئة الحقول المطلوبة: ${missing.join(', ')}',
-                );
-                return;
-              }
-              if (!controller.canChangeValue(control.id)) {
-                Get.snackbar(
-                  'تنبيه',
-                  'لا يمكن تغيير القيمة قبل مسح قيم الأدوات التابعة',
-                );
-                return;
-              }
-              final selected = await showDialog<Map<String, dynamic>>(
-                context: context,
-                builder: (_) => _ConnectedOptionsDialog(
-                  control: control,
-                  formId: controller.currentForm.value!.id,
-                  controller: controller,
-                ),
-              );
-              if (selected != null) {
-                // تحويل القيمة المختارة إلى JSON string للحفظ
-                controller.setValue(control.id, jsonEncode(selected));
-              }
-            },
-            child: const Text('اختيار'),
-          ),
-        ],
-      ),
-    );
+              },
+              child: const Text('اختيار'),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: () {
+                controller.clearValue(control.id);
+              },
+              child: const Text('مسح'),
+            ),
+          ],
+        ),
+      );
+    });
   }
 }
 
@@ -145,10 +152,10 @@ class _ConnectedOptionsDialogState extends State<_ConnectedOptionsDialog> {
   void initState() {
     super.initState();
     optionsController = Get.put(ConnectedOptionsController());
-    optionsController.page = 1;
     optionsController.load(
-      formId: widget.formId,
+      table_id: widget.control.tableId!,
       controlId: widget.control.id,
+      filters: widget.control.meta,
       controlValues: widget.controller.buildControlValuesPayload(),
     );
   }
@@ -183,8 +190,9 @@ class _ConnectedOptionsDialogState extends State<_ConnectedOptionsDialog> {
                       ),
                       onSubmitted: (q) => optionsController.search(
                         q,
-                        formId: widget.formId,
+                        table_id: widget.control.tableId!,
                         controlId: widget.control.id,
+                        flitter: widget.control.meta,
                         controlValues: widget.controller
                             .buildControlValuesPayload(),
                       ),
@@ -195,8 +203,9 @@ class _ConnectedOptionsDialogState extends State<_ConnectedOptionsDialog> {
                     icon: const Icon(Icons.refresh),
                     onPressed: () => optionsController.search(
                       searchController.text.trim(),
-                      formId: widget.formId,
+                      table_id: widget.control.tableId!,
                       controlId: widget.control.id,
+                      flitter: widget.control.meta,
                       controlValues: widget.controller
                           .buildControlValuesPayload(),
                     ),
@@ -214,31 +223,27 @@ class _ConnectedOptionsDialogState extends State<_ConnectedOptionsDialog> {
                   if (items.isEmpty) {
                     return const Center(child: Text('لا توجد نتائج'));
                   }
+                  List<Map<String, dynamic>> item = [];
+                  item.assignAll(items);
+
                   return ListView.builder(
-                    itemCount: items.length,
+                    itemCount: item.length,
                     itemBuilder: (context, index) {
-                      final it = items[index];
-                      final displayText = (it.display.isEmpty)
-                          ? (it.value?.toString() ?? '')
-                          : it.display.entries
-                                .map((e) => '${e.key}: ${e.value ?? ''}')
-                                .join(' | ');
+                      final currentMap = item[index];
+
+                      final firstEntry = (currentMap as Map).entries.first;
+                      final secondEntry = (currentMap as Map).entries.last;
+
                       return ListTile(
                         title: Text(
-                          (it.label.isNotEmpty
-                                  ? it.label
-                                  : it.value?.toString() ?? '')
-                              .trim(),
-                        ),
-                        subtitle: Text(displayText),
+                          firstEntry.value.toString(),
+                        ), // القيمة الأولى
+                        subtitle: Text(
+                          secondEntry.value.toString(),
+                        ), // القيمة الثانية
                         onTap: () {
-                          final selected = {
-                            'value': it.value,
-                            'keys': it.fks,
-                            'label': it.label,
-                            'display': it.display,
-                          };
-                          Navigator.pop(context, selected);
+                          widget.controller.setValue(widget.control.id, firstEntry.value);
+                          Navigator.of(context).pop();
                         },
                       );
                     },
@@ -258,8 +263,9 @@ class _ConnectedOptionsDialogState extends State<_ConnectedOptionsDialog> {
                           (optionsController.hasMore.value &&
                               !optionsController.isLoading.value)
                           ? () => optionsController.nextPage(
-                              formId: widget.formId,
+                              table_id: widget.control.tableId!,
                               controlId: widget.control.id,
+                              flitter: widget.control.meta,
                               controlValues: widget.controller
                                   .buildControlValuesPayload(),
                             )

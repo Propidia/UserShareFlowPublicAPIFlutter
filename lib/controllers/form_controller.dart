@@ -18,6 +18,8 @@ class FormController extends GetxController {
   final values = RxMap<int, dynamic>({});
   // تبعيات بسيطة: {parentControlId -> [childControlIds]}
   final Map<int, List<int>> dependencies = {};
+  // تبعيات أدوات الربط: {connectedControlId -> [requiredControlIds]}
+  final Map<int, List<int>> connectedDependencies = {};
 
   Future<void> loadForms() async {
     try {
@@ -39,6 +41,7 @@ class FormController extends GetxController {
       currentForm.value = form;
       values.clear();
       dependencies.clear();
+      connectedDependencies.clear();
       _indexDependencies(form.controls);
     } catch (e) {
       Get.snackbar('خطأ', 'فشل جلب هيكل النموذج');
@@ -100,18 +103,106 @@ class FormController extends GetxController {
 
   void clearDependents(int controlId) {
     final dependents = dependencies[controlId] ?? const <int>[];
+    final visited = <int>{};
     for (final depId in dependents) {
-      values.remove(depId);
+      _clearValueAndDescendants(depId, visited: visited);
     }
     update();
   }
 
+  void registerConnectedDependencies(int connectedControlId, List<int> requiredControlIds) {
+    // نسجّل الاعتمادية مرة واحدة، ونزيل التكرار لضمان نظافة البيانات
+    final unique = <int>{...requiredControlIds}.toList();
+    connectedDependencies[connectedControlId] = unique;
+    // نحدّث خريطة dependencies بحيث يكون كل requiredControlId أباً لأداة الربط
+    for (final parentId in unique) {
+      dependencies.putIfAbsent(parentId, () => <int>[]);
+      if (!dependencies[parentId]!.contains(connectedControlId)) {
+        dependencies[parentId]!.add(connectedControlId);
+      }
+    }
+  }
+
+  bool isLockedByConnected(int controlId) {
+    // إذا كانت هناك أداة ربط لديها قيمة حالية وتعتمد على هذا الحقل، اعتبره مقفولاً
+    for (final entry in connectedDependencies.entries) {
+      final connectedId = entry.key;
+      final requiredIds = entry.value;
+      if (requiredIds.contains(controlId)) {
+        final v = values[connectedId];
+        if (v != null && v.toString().trim().isNotEmpty) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  List<int> getLockingConnectedControls(int controlId) {
+    final lockers = <int>[];
+    for (final entry in connectedDependencies.entries) {
+      final connectedId = entry.key;
+      final requiredIds = entry.value;
+      if (requiredIds.contains(controlId)) {
+        final v = values[connectedId];
+        if (v != null && v.toString().trim().isNotEmpty) {
+          lockers.add(connectedId);
+        }
+      }
+    }
+    return lockers;
+  }
+
   void setValue(int controlId, dynamic value) {
+    // السماح بمسح القيمة دائماً، مع مسح جميع التابعين بشكل تلقائي
+    final bool isClearing = value == null || value.toString().trim().isEmpty;
+    if (isClearing) {
+      _clearValueAndDescendants(controlId, visited: <int>{});
+      update();
+      return;
+    }
+    // منع تعديل الحقول المقفولة بسبب اختيار قيمة في أداة ربط تعتمد عليها
+    if (isLockedByConnected(controlId)) {
+      final lockers = getLockingConnectedControls(controlId);
+      final lockersText = lockers.isEmpty ? '' : ' (${lockers.join(', ')})';
+      Get.snackbar('تنبيه',
+          'لا يمكن تعديل هذا الحقل لأنه مرتبط بأداة ربط تحتوي قيمة$lockersText. قم بمسح قيمة أداة الربط أولاً.');
+      return;
+    }
+    // منع تغيير القيمة إن كانت هناك أدوات تابعة مملوءة (باستثناء حالة المسح التي تمت معالجتها أعلاه)
     if (!canChangeValue(controlId)) {
       Get.snackbar('تنبيه', 'لا يمكن تغيير القيمة قبل مسح قيم الأدوات التابعة');
       return;
     }
     values[controlId] = value;
+    update();
+  }
+
+  void _clearValueAndDescendants(int controlId, {required Set<int> visited}) {
+    if (visited.contains(controlId)) return;
+    visited.add(controlId);
+
+    // امسح قيمة هذا الحقل
+    values.remove(controlId);
+
+    // امسح التابعين من شجرة الواجهة (dependencies)
+    final dependents = dependencies[controlId] ?? const <int>[];
+    for (final depId in dependents) {
+      _clearValueAndDescendants(depId, visited: visited);
+    }
+
+    // امسح أدوات الربط التي تعتمد على هذا الحقل (connectedDependencies معكوساً)
+    for (final entry in connectedDependencies.entries) {
+      final int connectedId = entry.key;
+      final List<int> requiredIds = entry.value;
+      if (requiredIds.contains(controlId)) {
+        _clearValueAndDescendants(connectedId, visited: visited);
+      }
+    }
+  }
+
+  void clearValue(int controlId) {
+    _clearValueAndDescendants(controlId, visited: <int>{});
     update();
   }
 

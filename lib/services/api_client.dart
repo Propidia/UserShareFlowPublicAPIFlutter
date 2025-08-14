@@ -45,32 +45,42 @@ class ApiClient {
     throw Exception('فشل جلب هيكل النموذج (${res.statusCode})');
   }
 
-  Future<ConnectedOptionsResponse> getConnectedOptions(
-    ConnectedOptionsRequest req,
-  ) async {
-    final query = req.toQuery();
-    final uri = _uri('/GetConnectedOptions', query);
-    final res = await http
-        .get(uri, headers: _headers)
-        .timeout(AppConfig.httpTimeout);
-    if (res.statusCode == 200) {
-      final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
-      // Debug: طباعة أول عنصر للتشخيص
-      try {
-        final items = (data['items'] as List?) ?? const [];
-        if (items.isNotEmpty) {
-          // ignore: avoid_print
-          print('[API] first connected option: ' + items.first.toString());
-        } else {
-          // ignore: avoid_print
-          print('[API] connected options empty');
-        }
-      } catch (_) {}
-      print(data);
-      return ConnectedOptionsResponse.fromJson(data);
+  Future<List<Map<String, dynamic>>> getConnectedOptions(
+  ConnectedOptionsRequest req,
+) async {
+  List<Map<String, dynamic>> items = [];
+
+  final query = req.toQuery();
+  final uri = _uri('/GetDataForm', query);
+  final res = await http
+      .get(uri, headers: _headers)
+      .timeout(AppConfig.httpTimeout);
+
+  if (res.statusCode == 200) {
+    final Map<String, dynamic> data =
+        jsonDecode(utf8.decode(res.bodyBytes));
+
+    try {
+      final rawList = data['data'];
+      if (rawList is List) {
+        items = rawList
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+      if (items.isNotEmpty) {
+        print('[API] first connected option: ${items.first}');
+      } else {
+        print('[API] connected options empty');
+      }
+    } catch (e) {
+      print('Parsing error: $e');
     }
-    throw Exception('فشل جلب خيارات أداة الربط (${res.statusCode})');
+    return items;
   }
+  throw Exception('فشل جلب خيارات أداة الربط (${res.statusCode})');
+}
+
 
   Future<Map<String, dynamic>> getDataForm(GetDataFormRequest req) async {
     final query = req.toQuery();
