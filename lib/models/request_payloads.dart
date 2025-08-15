@@ -4,7 +4,6 @@ class ConnectedOptionsRequest {
   final int table_id;
   final int controlId;
   final Map<String, dynamic> flitter;
-  final int pageSize;
   final String fields; // default
   final String order;
   final String q;
@@ -15,7 +14,6 @@ class ConnectedOptionsRequest {
     required this.table_id,
     required this.controlId,
     this.flitter = const {},
-    this.pageSize = 50,
     this.fields = 'default',
     this.order = '',
     this.q = '',
@@ -28,7 +26,6 @@ class ConnectedOptionsRequest {
       'table_id': table_id.toString(),
       'connected_control_id': controlId.toString(),
       'filters': jsonEncode(flitter),
-      'page_size': pageSize.toString(),
       'fields': fields,
       if (order.isNotEmpty) 'order': order,
       if (q.isNotEmpty) 'q': q,

@@ -21,7 +21,6 @@ class ConnectedControl extends StatelessWidget {
     // 1) الصيغة الجديدة: meta.quick_usage.get_data_form.params.filtersDepends
     // 2) fallback للصيغة القديمة: meta.filters.placeholders
     final requiredControls = <int>[];
-    // final meta = control.meta; // غير مستخدم حالياً
     final quick = control.quickUsageMeta;
     if (quick != null) {
       final dynamic getDataForm = quick['get_data_form'];
@@ -41,22 +40,6 @@ class ConnectedControl extends StatelessWidget {
         }
       }
     }
-    // الصيغة القديمة إن لم نجد اعتمادات في الصيغة الجديدة
-    // if (requiredControls.isEmpty && meta is Map) {
-    //   final filters = (meta as Map)['filters'];
-    //   List<dynamic> placeholders = const [];
-    //   if (filters is Map) {
-    //     final phs = filters['placeholders'];
-    //     if (phs is List) {
-    //       placeholders = phs;
-    //     }
-    //   }
-    //   for (final p in placeholders) {
-    //     if (p is Map && p['required'] == true && p['control_id'] is int) {
-    //       requiredControls.add(p['control_id'] as int);
-    //     }
-    //   }
-    // }
     return Obx(() {
       final currentText = controller.values[control.id]?.toString() ?? '';
       final display = currentText;
