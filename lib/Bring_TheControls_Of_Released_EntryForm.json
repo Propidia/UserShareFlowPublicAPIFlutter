@@ -1,0 +1,206 @@
+{
+    "id": 202,
+    "name": "api 3",
+    "controls": [
+        {
+            "id": 2,
+            "name": "نص عادي",
+            "type": "نص عادي",
+            "required": true,
+            "value": null
+        },
+        {
+            "id": 3,
+            "name": "نص كبير",
+            "type": "نص كبير",
+            "required": false,
+            "value": null
+        },
+        {
+            "id": 4,
+            "name": "رقم",
+            "type": "رقم",
+            "required": false,
+            "value": null
+        },
+        {
+            "id": 5,
+            "name": "رقم عشري",
+            "type": "رقم عشري",
+            "required": true,
+            "value": null
+        },
+        {
+            "id": 7,
+            "name": "ملف",
+            "type": "ملف",
+            "required": true,
+            "value": {
+                "files": [
+                    {
+                        "base64": null,
+                        "server_path": null,
+                        "path": null
+                    }
+                ],
+                "folders": [
+                    {
+                        "folder_path": null
+                    }
+                ]
+            }
+        },
+        {
+            "id": 8,
+            "name": "جدول",
+            "type": "جدول",
+            "rows": [
+                {
+                    "controls": [
+                        {
+                            "id": 11,
+                            "name": "نص عادي",
+                            "type": "نص عادي",
+                            "required": true,
+                            "value": null
+                        },
+                        {
+                            "id": 12,
+                            "name": "رقم",
+                            "type": "رقم",
+                            "required": true,
+                            "value": null
+                        },
+                        {
+                            "id": 13,
+                            "name": "اداة ربط",
+                            "type": "أداة ربط",
+                            "required": true,
+                            "value": {
+                                "ID": null,
+                                "الادارة": null,
+                                "رقم المستخدم": null,
+                                "اسم المستخدم": null,
+                                "الشركة": null
+                            },
+                            "meta": {
+                                "connected": {
+                                    "table_id": 206,
+                                    "fields_default": {
+                                        "by_id": [
+                                            6104,
+                                            181199,
+                                            6105,
+                                            6116,
+                                            6108
+                                        ],
+                                        "by_name": [
+                                            "ID",
+                                            "الادارة",
+                                            "رقم المستخدم",
+                                            "اسم المستخدم",
+                                            "الشركة"
+                                        ]
+                                    }
+                                },
+                                "quick_usage": {
+                                    "get_data_form": {
+                                        "endpoint": "GET /GetDataForm",
+                                        "params": {
+                                            "table_id": 206,
+                                            "fields": "default",
+                                            "orderfields": "c501",
+                                            "ordertype": "DESC",
+                                            "filtersDepends": [
+                                                9
+                                            ],
+                                            "filters": {
+                                                "rootGroup": {
+                                                    "type": "group",
+                                                    "children": [
+                                                        {
+                                                            "type": "comparing",
+                                                            "splitter": null,
+                                                            "left": "\"الادارة\"",
+                                                            "op": " = ",
+                                                            "right": {
+                                                                "type": "connected control",
+                                                                "value": "< replace the value of اسم الإدارة in  9 control here>",
+                                                                "control_id": 9,
+                                                                "key": "اسم الإدارة"
+                                                            }
+                                                        },
+                                                        {
+                                                            "type": "comparing",
+                                                            "splitter": "AND",
+                                                            "left": 0,
+                                                            "op": " > ",
+                                                            "right": {
+                                                                "type": "connected control",
+                                                                "value": "< replace the value of رقم الإدارة in  9 control here>",
+                                                                "control_id": 9,
+                                                                "key": "رقم الإدارة"
+                                                            }
+                                                        },
+                                                        {
+                                                            "type": "comparing",
+                                                            "splitter": "AND",
+                                                            "left": null,
+                                                            "op": " is not ",
+                                                            "right": {
+                                                                "type": "connected control",
+                                                                "value": "< replace the value of اسم الإدارة in  9 control here>",
+                                                                "control_id": 9,
+                                                                "key": "اسم الإدارة"
+                                                            }
+                                                        }
+                                                    ]
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "id": 9,
+            "name": "اداة ربط",
+            "type": "أداة ربط",
+            "required": true,
+            "value": {
+                "رقم الإدارة": null,
+                "اسم الإدارة": null
+            },
+            "meta": {
+                "connected": {
+                    "table_id": 202,
+                    "fields_default": {
+                        "by_id": [
+                            6094,
+                            6095
+                        ],
+                        "by_name": [
+                            "رقم الإدارة",
+                            "اسم الإدارة"
+                        ]
+                    }
+                },
+                "quick_usage": {
+                    "get_data_form": {
+                        "endpoint": "GET /GetDataForm",
+                        "params": {
+                            "table_id": 202,
+                            "fields": "default",
+                            "orderfields": "c501",
+                            "ordertype": "DESC"
+                        }
+                    }
+                }
+            }
+        }
+    ]
+}

@@ -43,7 +43,41 @@ class _DynamicFormScreenState extends State<DynamicFormScreen> {
                   .map((c) => ControlFactory.buildControl(c, formController))
                   .toList(),
               const SizedBox(height: 24),
-              const Text('ملاحظة: سيتم إضافة زر الإرسال لاحقاً'),
+              Obx(
+                () => SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton(
+                    onPressed: formController.isSubmitting.value
+                        ? null
+                        : () => formController.submitForm(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: formController.isSubmitting.value
+                        ? const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Text('جاري الإرسال...'),
+                            ],
+                          )
+                        : const Text(
+                            'إرسال النموذج',
+                            style: TextStyle(fontSize: 16),
+                          ),
+                  ),
+                ),
+              ),
             ],
           ),
         );

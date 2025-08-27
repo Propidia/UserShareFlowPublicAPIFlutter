@@ -6,7 +6,11 @@ import 'control_connected.dart';
 import 'control_table.dart';
 
 class ControlFactory {
-  static Widget buildControl(ControlModel c, FormController controller) {
+  static Widget buildControl(
+    ControlModel c,
+    FormController controller, {
+    List<Map<String, dynamic>>? currentRowControls,
+  }) {
     switch (c.type) {
       case 1:
       case 2:
@@ -22,7 +26,11 @@ class ControlFactory {
       case 8:
         return TableControl(control: c, controller: controller);
       case 16:
-        return ConnectedControl(control: c, controller: controller);
+        return ConnectedControl(
+          control: c,
+          controller: controller,
+          currentRowControls: currentRowControls,
+        );
       case 17:
         return GeoControl(control: c, controller: controller);
       case 20:

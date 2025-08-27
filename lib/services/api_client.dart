@@ -46,41 +46,39 @@ class ApiClient {
   }
 
   Future<List<Map<String, dynamic>>> getConnectedOptions(
-  ConnectedOptionsRequest req,
-) async {
-  List<Map<String, dynamic>> items = [];
+    ConnectedOptionsRequest req,
+  ) async {
+    List<Map<String, dynamic>> items = [];
 
-  final query = req.toQuery();
-  final uri = _uri('/GetDataForm', query);
-  final res = await http
-      .get(uri, headers: _headers)
-      .timeout(AppConfig.httpTimeout);
+    final query = req.toQuery();
+    final uri = _uri('/GetDataForm', query);
+    final res = await http
+        .get(uri, headers: _headers)
+        .timeout(AppConfig.httpTimeout);
 
-  if (res.statusCode == 200) {
-    final Map<String, dynamic> data =
-        jsonDecode(utf8.decode(res.bodyBytes));
+    if (res.statusCode == 200) {
+      final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
 
-    try {
-      final rawList = data['data'];
-      if (rawList is List) {
-        items = rawList
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
+      try {
+        final rawList = data['data'];
+        if (rawList is List) {
+          items = rawList
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+        }
+        if (items.isNotEmpty) {
+          print('[API] first connected option: ${items.first}');
+        } else {
+          print('[API] connected options empty');
+        }
+      } catch (e) {
+        print('Parsing error: $e');
       }
-      if (items.isNotEmpty) {
-        print('[API] first connected option: ${items.first}');
-      } else {
-        print('[API] connected options empty');
-      }
-    } catch (e) {
-      print('Parsing error: $e');
+      return items;
     }
-    return items;
+    throw Exception('فشل جلب خيارات أداة الربط (${res.statusCode})');
   }
-  throw Exception('فشل جلب خيارات أداة الربط (${res.statusCode})');
-}
-
 
   Future<Map<String, dynamic>> getDataForm(GetDataFormRequest req) async {
     final query = req.toQuery();
@@ -93,5 +91,27 @@ class ApiClient {
       return data;
     }
     throw Exception('فشل جلب البيانات (${res.statusCode})');
+  }
+
+  /// إرسال بيانات النموذج
+  Future<Map<String, dynamic>> submitForm(Map<String, dynamic> payload) async {
+    final uri = _uri(AppConfig.submitFormEndpoint);
+
+    print('\n📤 إرسال النموذج:');
+    print('   URL: $uri');
+    print('   Payload: ${jsonEncode(payload)}');
+
+    final res = await http
+        .post(uri, body: jsonEncode(payload), headers: _headers)
+        .timeout(AppConfig.httpTimeout);
+
+    print('   Response Status: ${res.statusCode}');
+    print('   Response Body: ${res.body}');
+
+    if (res.statusCode == 200) {
+      final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
+      return data;
+    }
+    throw Exception('فشل إرسال النموذج (${res.statusCode}): ${res.body}');
   }
 }

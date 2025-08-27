@@ -24,17 +24,24 @@ class _TableControlState extends State<TableControl> {
     super.initState();
     // صف ابتدائي واحد
     rows.add(widget.control.children.map((e) => e).toList());
+    _updateRowCount();
   }
 
   void _addRow() {
     rows.add(widget.control.children.map((e) => e).toList());
+    _updateRowCount();
     setState(() {});
   }
 
   void _removeRow(int index) {
     if (rows.length <= 1) return;
     rows.removeAt(index);
+    _updateRowCount();
     setState(() {});
+  }
+
+  void _updateRowCount() {
+    widget.controller.updateTableRowCount(widget.control.id, rows.length);
   }
 
   @override
@@ -88,7 +95,25 @@ class _TableControlState extends State<TableControl> {
                         child: Text('تحذير: لا يمكن وضع جدول داخل جدول'),
                       );
                     }
-                    return ControlFactory.buildControl(c, widget.controller);
+
+                    // تحويل أدوات الصف الحالي إلى Map لتمريرها لأدوات الربط
+                    final currentRowControls = controls
+                        .map(
+                          (control) => {
+                            'id': control.id,
+                            'name': control.name,
+                            'type': control.type,
+                            'value': widget.controller.values[control.id],
+                            if (control.meta != null) 'meta': control.meta,
+                          },
+                        )
+                        .toList();
+
+                    return ControlFactory.buildControl(
+                      c,
+                      widget.controller,
+                      currentRowControls: currentRowControls,
+                    );
                   }).toList(),
                 ],
               );

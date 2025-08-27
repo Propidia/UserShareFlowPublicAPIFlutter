@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -9,10 +8,13 @@ import '../../models/form_models.dart';
 class ConnectedControl extends StatelessWidget {
   final ControlModel control;
   final FormController controller;
+  final List<Map<String, dynamic>>? currentRowControls;
+
   const ConnectedControl({
     super.key,
     required this.control,
     required this.controller,
+    this.currentRowControls,
   });
 
   @override
@@ -35,14 +37,33 @@ class ConnectedControl extends StatelessWidget {
               }
             }
             // تسجيل الاعتمادية في المتحكم العام للنموذج حتى يمكن قفل الحقول عندما تُختار قيمة في أداة الربط
-            controller.registerConnectedDependencies(control.id, requiredControls);
+            controller.registerConnectedDependencies(
+              control.id,
+              requiredControls,
+            );
           }
         }
       }
     }
     return Obx(() {
-      final currentText = controller.values[control.id]?.toString() ?? '';
-      final display = currentText;
+      final currentValue = controller.values[control.id];
+      String display = '';
+
+      if (currentValue != null) {
+        if (currentValue is Map) {
+          // عرض القيم المنظمة لأداة الربط
+          final valueMap = Map<String, dynamic>.from(currentValue);
+          final displayParts = <String>[];
+          valueMap.forEach((key, value) {
+            if (value != null && value.toString().isNotEmpty) {
+              displayParts.add('$key: $value');
+            }
+          });
+          display = displayParts.join(' | ');
+        } else {
+          display = currentValue.toString();
+        }
+      }
       final missing = <int>[];
       for (final depId in requiredControls) {
         final v = controller.values[depId];
@@ -90,10 +111,11 @@ class ConnectedControl extends StatelessWidget {
                     control: control,
                     formId: controller.currentForm.value!.id,
                     controller: controller,
+                    currentRowControls: currentRowControls,
                   ),
                 );
                 if (selected != null) {
-                  controller.setValue(control.id, jsonEncode(selected));
+                  controller.setConnectedValue(control.id, selected);
                 }
               },
               child: const Text('اختيار'),
@@ -116,10 +138,13 @@ class _ConnectedOptionsDialog extends StatefulWidget {
   final ControlModel control;
   final int formId;
   final FormController controller;
+  final List<Map<String, dynamic>>? currentRowControls;
+
   const _ConnectedOptionsDialog({
     required this.control,
     required this.formId,
     required this.controller,
+    this.currentRowControls,
   });
 
   @override
@@ -136,10 +161,12 @@ class _ConnectedOptionsDialogState extends State<_ConnectedOptionsDialog> {
     super.initState();
     optionsController = Get.put(ConnectedOptionsController());
     optionsController.load(
-      table_id: widget.control.tableId!,
+      table_id: widget.control.meta!['connected']['table_id'] as int,
       controlId: widget.control.id,
       filters: widget.control.meta,
       controlValues: widget.controller.buildControlValuesPayload(),
+      formData: widget.controller.buildFormData(),
+      currentRowControls: widget.currentRowControls,
     );
   }
 
@@ -178,6 +205,8 @@ class _ConnectedOptionsDialogState extends State<_ConnectedOptionsDialog> {
                         flitter: widget.control.meta,
                         controlValues: widget.controller
                             .buildControlValuesPayload(),
+                        formData: widget.controller.buildFormData(),
+                        currentRowControls: widget.currentRowControls,
                       ),
                     ),
                   ),
@@ -191,6 +220,8 @@ class _ConnectedOptionsDialogState extends State<_ConnectedOptionsDialog> {
                       flitter: widget.control.meta,
                       controlValues: widget.controller
                           .buildControlValuesPayload(),
+                      formData: widget.controller.buildFormData(),
+                      currentRowControls: widget.currentRowControls,
                     ),
                   ),
                 ],
@@ -213,21 +244,64 @@ class _ConnectedOptionsDialogState extends State<_ConnectedOptionsDialog> {
                     itemCount: item.length,
                     itemBuilder: (context, index) {
                       final currentMap = item[index];
+                      final entries = (currentMap as Map).entries.toList();
 
-                      final firstEntry = (currentMap as Map).entries.first;
-                      final secondEntry = (currentMap as Map).entries.last;
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        child: InkWell(
+                          onTap: () {
+                            // تمرير البيانات الكاملة
+                            Navigator.of(context).pop(currentMap);
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // عرض كل الأعمدة
+                                ...entries.map((entry) {
+                                  final key = entry.key.toString();
+                                  final value = entry.value?.toString() ?? '';
 
-                      return ListTile(
-                        title: Text(
-                          firstEntry.value.toString(),
-                        ), // القيمة الأولى
-                        subtitle: Text(
-                          secondEntry.value.toString(),
-                        ), // القيمة الثانية
-                        onTap: () {
-                          widget.controller.setValue(widget.control.id, firstEntry.value);
-                          Navigator.of(context).pop();
-                        },
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 2,
+                                    ),
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Expanded(
+                                          flex: 2,
+                                          child: Text(
+                                            key,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.grey,
+                                            ),
+                                          ),
+                                        ),
+                                        const Text(': '),
+                                        Expanded(
+                                          flex: 3,
+                                          child: Text(
+                                            value,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }).toList(),
+                              ],
+                            ),
+                          ),
+                        ),
                       );
                     },
                   );

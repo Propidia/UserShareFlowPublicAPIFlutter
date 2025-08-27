@@ -1,7 +1,4 @@
-import 'dart:convert';
-import 'package:flutter/widgets.dart';
 import 'package:get/get.dart';
-import '../models/form_models.dart';
 import '../models/request_payloads.dart';
 import '../services/api_client.dart';
 
@@ -18,6 +15,8 @@ class ConnectedOptionsController extends GetxController {
     Map<String, dynamic> controlValues = const {},
     Map<String, dynamic>? quickUsageMeta,
     Map<String, dynamic>? filters,
+    Map<String, dynamic>? formData,
+    List<Map<String, dynamic>>? currentRowControls,
   }) async {
     final flitter = filters;
     Map<String, dynamic> readyFlitter = {};
@@ -28,12 +27,16 @@ class ConnectedOptionsController extends GetxController {
         final dynamic params = getDataForm['params'];
         if (params is Map) {
           final dynamic filtersJson = params['filters'];
-          // debugPrint(filtersJson);
-          final replaced = replaceFilters(filtersJson, controlValues);
-          readyFlitter.clear();
-          readyFlitter.addAll(replaced);
-          debugPrint(filters.toString());
-          debugPrint(replaced.toString());
+          if (filtersJson is Map) {
+            final replaced = replaceFilters(
+              Map<String, dynamic>.from(filtersJson),
+              controlValues,
+              formData: formData,
+              currentRowControls: currentRowControls,
+            );
+            readyFlitter.clear();
+            readyFlitter.addAll(replaced);
+          }
         }
       }
     }
@@ -44,7 +47,7 @@ class ConnectedOptionsController extends GetxController {
         controlId: controlId,
         fields: 'default',
         q: q.value,
-        flitter: readyFlitter ?? {},
+        flitter: readyFlitter,
         controlValues: controlValues,
       );
       final res = await ApiClient.instance.getConnectedOptions(req);
@@ -56,19 +59,6 @@ class ConnectedOptionsController extends GetxController {
     }
   }
 
-  dynamic _extractByColId(Map<String, dynamic> row, int? id) {
-    if (id == null) return null;
-    for (final key in row.keys) {
-      final k = key.toString().replaceAll('"', '');
-      if (k == id.toString()) return row[key];
-      if (k.startsWith('$id ')) return row[key];
-      final match = RegExp(r'^(\d+)').firstMatch(k);
-      if (match != null && match.group(1) == id.toString()) return row[key];
-      if (k.contains('SYS Field-$id ')) return row[key];
-    }
-    return null;
-  }
-
   Future<void> search(
     String query, {
     required int table_id,
@@ -76,6 +66,8 @@ class ConnectedOptionsController extends GetxController {
     Map<String, dynamic>? flitter,
     Map<String, dynamic> controlValues = const {},
     Map<String, dynamic>? quickUsageMeta,
+    Map<String, dynamic>? formData,
+    List<Map<String, dynamic>>? currentRowControls,
   }) async {
     q.value = query;
 
@@ -86,6 +78,8 @@ class ConnectedOptionsController extends GetxController {
       controlValues: controlValues,
       quickUsageMeta: quickUsageMeta,
       filters: flitter,
+      formData: formData,
+      currentRowControls: currentRowControls,
     );
   }
 
@@ -95,6 +89,8 @@ class ConnectedOptionsController extends GetxController {
     Map<String, dynamic> controlValues = const {},
     Map<String, dynamic>? quickUsageMeta,
     Map<String, dynamic>? flitter,
+    Map<String, dynamic>? formData,
+    List<Map<String, dynamic>>? currentRowControls,
   }) async {
     if (!hasMore.value || isLoading.value) return;
 
@@ -104,166 +100,19 @@ class ConnectedOptionsController extends GetxController {
       controlValues: controlValues,
       quickUsageMeta: quickUsageMeta,
       filters: flitter,
+      formData: formData,
+      currentRowControls: currentRowControls,
     );
   }
 }
 
 extension _ConnectedOptionsHelpers on ConnectedOptionsController {
-  GetDataFormRequest _buildGetDataFormRequestFromQuickUsage({
-    required Map<String, dynamic>? quickUsage,
-    required int controlId,
-    required Map<String, dynamic> controlValues,
-    required int fallbackTableId,
-    required String fields,
-  }) {
-    int tableId = fallbackTableId;
-    String ordertype = 'DESC';
-    String? orderfields = 'c501';
-    String filtersJson = '';
-
-    if (quickUsage != null) {
-      final dynamic gdf = quickUsage['get_data_form'];
-      if (gdf is Map) {
-        final dynamic params = gdf['params'];
-        if (params is Map) {
-          if (params['table_id'] is int) tableId = params['table_id'] as int;
-          if (params['ordertype'] is String) {
-            final ot = (params['ordertype'] as String).trim();
-            if (ot.isNotEmpty) ordertype = ot;
-          }
-          if (params['orderfields'] is String) {
-            final of = (params['orderfields'] as String).trim();
-            if (of.isNotEmpty) orderfields = of;
-          }
-          final List<dynamic> depends =
-              (params['filtersDepends'] as List?) ?? const [];
-          final dynamic filters = params['filters'];
-          if (filters != null) {
-            final replaced = _replacePlaceholdersDeep(
-              filters,
-              depends,
-              controlValues,
-            );
-            try {
-              filtersJson = jsonEncode(replaced);
-            } catch (_) {
-              filtersJson = '';
-            }
-          }
-        }
-      }
-    }
-
-    return GetDataFormRequest(
-      tableId: tableId,
-      maxRowNumber: 0,
-
-      fields: fields,
-      filters: filtersJson,
-      ordertype: ordertype,
-      connectedControlId: controlId,
-      controlValues: controlValues,
-      orderfields: orderfields,
-    );
-  }
-
-  dynamic _replacePlaceholdersDeep(
-    dynamic node,
-    List<dynamic> depends,
-    Map<String, dynamic> controlValues,
-  ) {
-    if (node is Map) {
-      final out = <String, dynamic>{};
-      node.forEach((k, v) {
-        out[k.toString()] = _replacePlaceholdersDeep(v, depends, controlValues);
-      });
-      return out;
-    }
-    if (node is List) {
-      return node
-          .map((e) => _replacePlaceholdersDeep(e, depends, controlValues))
-          .toList();
-    }
-    if (node is String) {
-      if (node.contains('< Replace')) {
-        final int? cid = _extractControlIdFromPlaceholder(node);
-        if (cid != null) {
-          final source = _sourceForControlId(depends, cid);
-          final raw = controlValues[cid.toString()];
-          final fieldName = _extractFieldNameFromPlaceholder(node);
-          final val = _valueFromControl(
-            raw,
-            source: source,
-            fieldName: fieldName,
-          );
-          return val ?? '';
-        }
-      }
-      return node;
-    }
-    return node;
-  }
-
-  int? _extractControlIdFromPlaceholder(String s) {
-    final re = RegExp(r'[Ii]d\s*:?\s*(\d+)');
-    final m = re.firstMatch(s);
-    if (m != null) {
-      return int.tryParse(m.group(1)!);
-    }
-    return null;
-  }
-
-  String _sourceForControlId(List<dynamic> depends, int controlId) {
-    for (final d in depends) {
-      if (d is Map && d['control_id'] is int && d['control_id'] == controlId) {
-        return (d['source']?.toString() ?? 'control').toLowerCase();
-      }
-    }
-    return 'control';
-  }
-
-  String? _extractFieldNameFromPlaceholder(String s) {
-    final re = RegExp(r'value of\s+(.+?)\s+in Control', caseSensitive: false);
-    final m = re.firstMatch(s);
-    if (m != null) {
-      return m.group(1)?.trim();
-    }
-    return null;
-  }
-
-  dynamic _valueFromControl(
-    dynamic raw, {
-    required String source,
-    String? fieldName,
-  }) {
-    if (source == 'connected') {
-      try {
-        Map<String, dynamic>? obj;
-        if (raw is String && raw.trim().startsWith('{')) {
-          obj = jsonDecode(raw) as Map<String, dynamic>;
-        } else if (raw is Map) {
-          obj = Map<String, dynamic>.from(raw);
-        }
-        // if (obj != null) {
-        //   if (fieldName != null && obj['display'] is Map) {
-        //     final disp = Map<String, dynamic>.from(obj['display'] as Map);
-        //     if (disp.containsKey(fieldName)) return disp[fieldName];
-        //   }
-        //   if (obj['label'] != null && obj['label'].toString().isNotEmpty) {
-        //     return obj['label'];
-        //   }
-        //   if (obj['value'] != null) return obj['value'];
-        // }
-      } catch (_) {}
-      return null;
-    }
-    return raw;
-  }
-
   Map<String, dynamic> replaceFilters(
     Map<String, dynamic> filtersJson,
-    Map<String, dynamic> controlValues,
-  ) {
+    Map<String, dynamic> controlValues, {
+    Map<String, dynamic>? formData,
+    List<Map<String, dynamic>>? currentRowControls,
+  }) {
     dynamic processNode(dynamic node) {
       if (node is Map) {
         // إذا كان مفتاح null نحذفه مباشرة
@@ -288,24 +137,64 @@ extension _ConnectedOptionsHelpers on ConnectedOptionsController {
           }
         }
 
+        // البحث عن "right" التي تحتوي على "type"
+        if (node.containsKey('right') && node['right'] is Map) {
+          final rightNode = Map<String, dynamic>.from(node['right']);
+
+          if (rightNode.containsKey('type') &&
+              rightNode.containsKey('control_id')) {
+            final controlType = rightNode['type']?.toString() ?? '';
+            final controlId = rightNode['control_id'];
+
+            print('\n🔄 replaceFilters وجد مرشح للاستبدال:');
+            print('   type: $controlType');
+            print('   control_id: $controlId');
+            print('   key: ${rightNode['key']}');
+            print('   value الأصلية: ${rightNode['value']}');
+
+            dynamic replacementValue;
+
+            if (controlType == 'connected control') {
+              // للـ connected control نحتاج control_id و key
+              final key = rightNode['key']?.toString();
+              print('   🔄 بحث عن connected control...');
+              replacementValue = _findControlValue(
+                controlId: controlId,
+                key: key,
+                formData: formData,
+                currentRowControls: currentRowControls,
+              );
+            } else if (controlType == 'normal control') {
+              // للـ normal control نحتاج control_id فقط
+              print('   🔄 بحث عن normal control...');
+              replacementValue = _findControlValue(
+                controlId: controlId,
+                formData: formData,
+                currentRowControls: currentRowControls,
+              );
+            }
+
+            if (replacementValue != null) {
+              print(
+                '   ✅ تم الاستبدال: ${rightNode['value']} → $replacementValue',
+              );
+              rightNode['value'] = replacementValue;
+            } else {
+              print('   ❌ لم يتم العثور على قيمة للاستبدال');
+            }
+
+            return node.map(
+              (key, value) => key == 'right'
+                  ? MapEntry(key, rightNode)
+                  : MapEntry(key, processNode(value)),
+            );
+          }
+        }
+
         // معالجة باقي المفاتيح
         return node.map((key, value) => MapEntry(key, processNode(value)));
       } else if (node is List) {
         return node.map(processNode).where((e) => e != null).toList();
-      } else if (node is String && node.contains('< Replace')) {
-        // نمط عام لقراءة Id سواء Have id:X أو (Id: X)
-        final idMatch = RegExp(
-          r'Have id:(\d+)|\(Id:\s*(\d+)\)',
-        ).firstMatch(node);
-        if (idMatch != null) {
-          // idGroup1 = حالة "Have id:X"
-          // idGroup2 = حالة "(Id: X)"
-          final controlId = idMatch.group(1) ?? idMatch.group(2);
-          if (controlId != null && controlValues.containsKey(controlId)) {
-            return controlValues[controlId];
-          }
-        }
-        return '';
       }
 
       return node;
@@ -313,5 +202,82 @@ extension _ConnectedOptionsHelpers on ConnectedOptionsController {
 
     final result = processNode(filtersJson);
     return result == null ? {} : Map<String, dynamic>.from(result);
+  }
+
+  /// البحث عن قيمة الأداة أولاً في نفس الصف ثم خارج الجدول
+  dynamic _findControlValue({
+    required dynamic controlId,
+    String? key,
+    Map<String, dynamic>? formData,
+    List<Map<String, dynamic>>? currentRowControls,
+  }) {
+    final targetId = controlId.toString();
+
+    print('\n🔍 _findControlValue بحث عن:');
+    print('   controlId: $targetId');
+    print('   key: $key');
+    print(
+      '   currentRowControls متوفر: ${currentRowControls?.length ?? 0} أدوات',
+    );
+    print('   formData متوفر: ${formData != null}');
+
+    // البحث أولاً في نفس الصف
+    if (currentRowControls != null) {
+      print('   🔍 البحث في الصف الحالي...');
+      for (final control in currentRowControls) {
+        if (control['id'].toString() == targetId) {
+          print('   ✅ وُجدت في الصف الحالي: ${control['name']}');
+          final value = _extractValueFromControl(control, key);
+          print('   📤 القيمة المُستخرجة: $value');
+          return value;
+        }
+      }
+      print('   ❌ لم توجد في الصف الحالي');
+    }
+
+    // البحث خارج الجدول في المستوى الرئيسي
+    if (formData != null && formData.containsKey('controls')) {
+      print('   🔍 البحث خارج الجدول...');
+      final mainControls = formData['controls'] as List?;
+      if (mainControls != null) {
+        for (final control in mainControls) {
+          if (control is Map && control['id'].toString() == targetId) {
+            print('   ✅ وُجدت خارج الجدول: ${control['name']}');
+            final value = _extractValueFromControl(
+              Map<String, dynamic>.from(control),
+              key,
+            );
+            print('   📤 القيمة المُستخرجة: $value');
+            return value;
+          }
+        }
+      }
+      print('   ❌ لم توجد خارج الجدول');
+    }
+
+    print('   ❌ لم توجد الأداة نهائياً');
+    return null;
+  }
+
+  /// استخراج القيمة من الأداة حسب النوع
+  dynamic _extractValueFromControl(Map<String, dynamic> control, String? key) {
+    final value = control['value'];
+
+    print('   📋 _extractValueFromControl:');
+    print('     control name: ${control['name']}');
+    print('     control value: $value');
+    print('     requested key: $key');
+
+    if (key != null && value is Map) {
+      // للـ connected control نبحث عن المفتاح المحدد
+      final valueMap = Map<String, dynamic>.from(value);
+      final result = valueMap[key];
+      print('     ✅ نوع connected control، القيمة للمفتاح "$key": $result');
+      return result;
+    } else {
+      // للـ normal control نرجع القيمة مباشرة
+      print('     ✅ نوع normal control، القيمة المُرجعة: $value');
+      return value;
+    }
   }
 }

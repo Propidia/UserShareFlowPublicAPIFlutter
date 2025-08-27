@@ -234,6 +234,7 @@ class FileControl extends StatefulWidget {
 class _FileControlState extends State<FileControl> {
   List<Map<String, dynamic>> files = [];
   List<Map<String, dynamic>> folders = [];
+  String? selectedFolderPath; // المجلد المختار لإضافة الملفات إليه
 
   @override
   void initState() {
@@ -260,7 +261,12 @@ class _FileControlState extends State<FileControl> {
       final bytes = f.bytes;
       if (bytes != null) {
         final b64 = base64Encode(bytes);
-        files.add({'base64': b64, 'path': f.name});
+        // إضافة مسار المجلد إلى مسار الملف إذا كان مجلد مختار
+        String filePath = f.name;
+        if (selectedFolderPath != null && selectedFolderPath!.isNotEmpty) {
+          filePath = '$selectedFolderPath/$filePath';
+        }
+        files.add({'base64': b64, 'path': filePath});
         _sync();
       }
     }
@@ -296,89 +302,166 @@ class _FileControlState extends State<FileControl> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Obx(() {
-      final bool isLocked = widget.controller.isLockedByConnected(widget.control.id);
-      if (isLocked) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(widget.control.name),
-              const SizedBox(height: 6),
-              if (folders.isNotEmpty)
-                Text('المجلدات: ' + folders
+  Widget _buildDisplayContent() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(widget.control.name),
+        const SizedBox(height: 6),
+        if (folders.isNotEmpty)
+          Text(
+            'المجلدات: ' +
+                folders
                     .map((f) => f['folder_path']?.toString() ?? '')
                     .where((s) => s.isNotEmpty)
-                    .join(', ')),
-              if (files.isNotEmpty)
-                Text('الملفات: ' + files
+                    .join(', '),
+          ),
+        if (files.isNotEmpty)
+          Text(
+            'الملفات: ' +
+                files
                     .map((f) => f['path']?.toString() ?? '')
                     .where((s) => s.isNotEmpty)
-                    .join(', ')),
-              if (folders.isEmpty && files.isEmpty) const Text('لا توجد بيانات'),
-            ],
+                    .join(', '),
           ),
-        );
-      }
+        if (folders.isEmpty && files.isEmpty) const Text('لا توجد بيانات'),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // الحصول على حالة القفل بدون Obx لتجنب مشكلة الـ observable variables
+    final isLocked = widget.controller.isLockedByConnected(widget.control.id);
+
+    if (isLocked) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(widget.control.name),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
+        child: _buildDisplayContent(),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(widget.control.name),
+          const SizedBox(height: 8),
+          // عرض dropdown للمجلدات إذا وُجدت مجلدات
+          if (folders.isNotEmpty) ...[
+            Row(
               children: [
-                ElevatedButton.icon(
-                  onPressed: _pickFile,
-                  icon: const Icon(Icons.upload),
-                  label: const Text('إضافة ملف'),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: selectedFolderPath,
+                    decoration: const InputDecoration(
+                      labelText: 'اختيار مجلد للملف',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.folder),
+                    ),
+                    items: [
+                      const DropdownMenuItem<String>(
+                        value: null,
+                        child: Text('بدون مجلد'),
+                      ),
+                      ...folders.map((folder) {
+                        final path = folder['folder_path']?.toString() ?? '';
+                        return DropdownMenuItem<String>(
+                          value: path,
+                          child: Text(path),
+                        );
+                      }).toList(),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        selectedFolderPath = value;
+                      });
+                    },
+                  ),
                 ),
-                OutlinedButton.icon(
-                  onPressed: _addFolder,
-                  icon: const Icon(Icons.create_new_folder),
-                  label: const Text('إضافة مجلد'),
-                ),
+                if (selectedFolderPath != null) ...[
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: () {
+                      setState(() {
+                        selectedFolderPath = null;
+                      });
+                    },
+                    icon: const Icon(Icons.close),
+                    tooltip: 'إلغاء اختيار المجلد',
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 8),
-            if (folders.isNotEmpty) Text('المجلدات (${folders.length})'),
-            ...folders.map(
-              (f) => ListTile(
-                dense: true,
-                title: Text(f['folder_path']?.toString() ?? ''),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () {
-                    folders.remove(f);
-                    _sync();
-                  },
-                ),
-              ),
-            ),
-            if (files.isNotEmpty) Text('الملفات (${files.length})'),
-            ...files.map(
-              (f) => ListTile(
-                dense: true,
-                title: Text(f['path']?.toString() ?? ''),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () {
-                    files.remove(f);
-                    _sync();
-                  },
-                ),
-              ),
-            ),
           ],
-        ),
-      );
-    });
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ElevatedButton.icon(
+                onPressed: _pickFile,
+                icon: const Icon(Icons.upload),
+                label: Text(
+                  selectedFolderPath != null
+                      ? 'إضافة ملف إلى $selectedFolderPath'
+                      : 'إضافة ملف',
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _addFolder,
+                icon: const Icon(Icons.create_new_folder),
+                label: const Text('إضافة مجلد'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (folders.isNotEmpty) Text('المجلدات (${folders.length})'),
+          ...folders.map(
+            (f) => ListTile(
+              dense: true,
+              title: Text(f['folder_path']?.toString() ?? ''),
+              trailing: IconButton(
+                icon: const Icon(Icons.delete_outline),
+                onPressed: () {
+                  folders.remove(f);
+                  _sync();
+                },
+              ),
+            ),
+          ),
+          if (files.isNotEmpty) Text('الملفات (${files.length})'),
+          ...files.map((f) {
+            final fullPath = f['path']?.toString() ?? '';
+            final pathParts = fullPath.split('/');
+            final fileName = pathParts.last;
+            final folderPath = pathParts.length > 1
+                ? pathParts.sublist(0, pathParts.length - 1).join('/')
+                : null;
+
+            return ListTile(
+              dense: true,
+              leading: Icon(
+                folderPath != null
+                    ? Icons.folder_open
+                    : Icons.insert_drive_file,
+                color: folderPath != null ? Colors.amber : Colors.blue,
+              ),
+              title: Text(fileName),
+              subtitle: folderPath != null ? Text('في: $folderPath') : null,
+              trailing: IconButton(
+                icon: const Icon(Icons.delete_outline),
+                onPressed: () {
+                  files.remove(f);
+                  _sync();
+                },
+              ),
+            );
+          }),
+        ],
+      ),
+    );
   }
 }
 
@@ -500,10 +583,8 @@ class CheckboxControl extends StatelessWidget {
         child: CheckboxListTile(
           title: Text(control.name),
           value: v,
-          onChanged: (checked) => controller.setValue(
-            control.id,
-            checked == true ? 'نعم' : 'لا',
-          ),
+          onChanged: (checked) =>
+              controller.setValue(control.id, checked == true ? 'نعم' : 'لا'),
         ),
       );
     });
