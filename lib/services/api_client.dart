@@ -97,16 +97,11 @@ class ApiClient {
   Future<Map<String, dynamic>> submitForm(Map<String, dynamic> payload) async {
     final uri = _uri(AppConfig.submitFormEndpoint);
 
-    print('\n📤 إرسال النموذج:');
-    print('   URL: $uri');
-    print('   Payload: ${jsonEncode(payload)}');
-
     final res = await http
         .post(uri, body: jsonEncode(payload), headers: _headers)
         .timeout(AppConfig.httpTimeout);
 
     print('   Response Status: ${res.statusCode}');
-    print('   Response Body: ${res.body}');
 
     if (res.statusCode == 200) {
       final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));

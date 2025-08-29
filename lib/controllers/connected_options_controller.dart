@@ -146,18 +146,11 @@ extension _ConnectedOptionsHelpers on ConnectedOptionsController {
             final controlType = rightNode['type']?.toString() ?? '';
             final controlId = rightNode['control_id'];
 
-            print('\n🔄 replaceFilters وجد مرشح للاستبدال:');
-            print('   type: $controlType');
-            print('   control_id: $controlId');
-            print('   key: ${rightNode['key']}');
-            print('   value الأصلية: ${rightNode['value']}');
-
             dynamic replacementValue;
 
             if (controlType == 'connected control') {
               // للـ connected control نحتاج control_id و key
               final key = rightNode['key']?.toString();
-              print('   🔄 بحث عن connected control...');
               replacementValue = _findControlValue(
                 controlId: controlId,
                 key: key,
@@ -166,7 +159,6 @@ extension _ConnectedOptionsHelpers on ConnectedOptionsController {
               );
             } else if (controlType == 'normal control') {
               // للـ normal control نحتاج control_id فقط
-              print('   🔄 بحث عن normal control...');
               replacementValue = _findControlValue(
                 controlId: controlId,
                 formData: formData,

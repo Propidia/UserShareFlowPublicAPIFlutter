@@ -372,17 +372,10 @@ class FormController extends GetxController {
       throw Exception('لا يوجد نموذج محمل');
     }
 
-    print('\n🔄 بناء Submit Payload:');
-    print('   Form ID: ${form.id}');
-    print('   Form Name: ${form.name}');
-    print('   Controls Count: ${form.controls.length}');
-    print('   Current Values: $values');
-
     final controls = _buildControlsForSubmit(form.controls);
 
     final payload = {'id': form.id, 'controls': controls};
 
-    print('   📋 Payload Final: ${jsonEncode(payload)}');
     return payload;
   }
 
