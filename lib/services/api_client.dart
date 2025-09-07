@@ -10,7 +10,10 @@ class ApiClient {
 
   Map<String, String> get _headers => {
     'Content-Type': 'application/json; charset=utf-8',
-    'API_KEY': AppConfig.apiKey,
+    'API-KEY': AppConfig.apiKey, // <--- تغيير هنا
+    'password': AppConfig.password,
+    'phone-user': AppConfig.username, // <--- تغيير هنا
+    'user-key': AppConfig.licenseKey, // <--- تغيير هنا
   };
 
   Uri _uri(String path, [Map<String, String>? query]) {
@@ -20,6 +23,8 @@ class ApiClient {
   }
 
   Future<List<Map<String, dynamic>>> fetchForms() async {
+    print('Headers being sent: $_headers');
+
     final uri = _uri('/Get_IDs_Names_Of_Released_Entry');
     final res = await http
         .get(uri, headers: _headers)

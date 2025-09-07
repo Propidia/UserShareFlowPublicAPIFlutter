@@ -472,8 +472,8 @@ class FormController extends GetxController {
       // بناء payload
       final payload = buildSubmitPayload();
 
-      print('\n🚀 بدء إرسال النموذج:');
-      print('📋 Payload: ${jsonEncode(payload)}');
+      // print('\n🚀 بدء إرسال النموذج:');
+      // print('📋 Payload: ${jsonEncode(payload)}');
 
       // إرسال للـ API
       final response = await ApiClient.instance.submitForm(payload);
