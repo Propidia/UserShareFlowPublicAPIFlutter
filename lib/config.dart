@@ -8,5 +8,5 @@ class AppConfig {
   static const String licenseKey = '9b303318500163a74363c43ef';
   static const String submitFormEndpoint = '/POST_FORM_DATA';
 
-  static const Duration httpTimeout = Duration(seconds: 20);
+  static const Duration httpTimeout = Duration(seconds: 600);
 }

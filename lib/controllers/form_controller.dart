@@ -477,7 +477,6 @@ class FormController extends GetxController {
 
       // إرسال للـ API
       final response = await ApiClient.instance.submitForm(payload);
-
       print('✅ تم الإرسال بنجاح: $response');
       Get.snackbar(
         'نجح الإرسال',
