@@ -1,7 +1,8 @@
 class AppConfig {
   AppConfig._();
 
-  static const String baseUrl = 'http://localhost:7000';
+  //static const String baseUrl = 'http://localhost:7000';
+  static const String baseUrl = 'http://143.198.218.229/SocketServer';
   static const String apiKey = '21761aa2457002e83953701a0';
   static const String password = '123456';
   static const String username = '778007575';
