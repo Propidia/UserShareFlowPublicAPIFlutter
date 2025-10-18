@@ -374,7 +374,7 @@ class FormController extends GetxController {
 
     final controls = _buildControlsForSubmit(form.controls);
 
-    final payload = {'id': form.id, 'controls': controls};
+    final payload = {'id': form.id, 'controls': controls , 'foldername': 'test'};
 
     return payload;
   }
