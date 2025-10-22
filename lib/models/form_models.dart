@@ -1,3 +1,5 @@
+import 'package:useshareflowpublicapiflutter/models/storage_models.dart';
+
 class FormStructureModel {
   final int id;
   final String name;
@@ -30,6 +32,7 @@ class ControlModel {
   final List<dynamic> options; // للأداة 6
   final String? dateType; // للأداة 5: date/time/datetime/date_h
   final int? tableId; // للأداة 16
+  final List<FileModel>? files;
   final List<String> fks; // للأداة 16
   final Map<String, dynamic>? meta; // للأداة 16
   final List<ControlModel> children; // للأداة 8
@@ -43,6 +46,7 @@ class ControlModel {
     this.options = const [],
     this.dateType,
     this.tableId,
+    this.files,
     this.fks = const [],
     this.meta,
     this.children = const [],

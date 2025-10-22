@@ -1,6 +1,8 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:useshareflowpublicapiflutter/minio/MinIOClass.dart';
 import '../models/form_models.dart';
 import '../services/api_client.dart';
 
@@ -366,15 +368,51 @@ class FormController extends GetxController {
   }
 
   /// بناء payload للإرسال إلى POST_FORM_DATA
-  Map<String, dynamic> buildSubmitPayload() {
+  Future<Map<String, dynamic>> buildSubmitPayload()async {
     final form = currentForm.value;
     if (form == null) {
       throw Exception('لا يوجد نموذج محمل');
     }
 
-    final controls = _buildControlsForSubmit(form.controls);
+    // رفع جميع ملفات النموذج مرة واحدة قبل بناء الـ payload
+    String folderName = 'noFolder';
+    print('🚀 بدء رفع ملفات النموذج إلى MinIO...');
+    
+    // تمرير values مباشرة إلى uploadFormFilesToMinIOValues (تعدل base64/path وتضيف foldername)
+    var uploadResult = await MinIOClass().uploadFormFilesToMinIOValues(values, 'api_applys');
+    
+    // دائماً التقط foldername المرجع من الدالة (قد توجد ملفات رُفعت جزئياً)
+    folderName = uploadResult.$2;
+    if (uploadResult.$1 == "success") {
+      print('✅ تم رفع جميع الملفات بنجاح، folder: $folderName');
+    } else {
+      print('⚠️ تحذير: مشكلة في رفع الملفات: ${uploadResult.$1}, folder: $folderName');
+    }
 
-    final payload = {'id': form.id, 'controls': controls , 'foldername': 'test'};
+    final controls = _buildControlsForSubmit(form.controls);
+    
+    // البحث عن foldername في الملفات وإزالته
+    final cleanedControls = controls.map((control) {
+      final cleanedControl = Map<String, dynamic>.from(control);
+      
+      // فحص إذا كان هناك ملفات في value وأخذ foldername
+      // استخدام type check بدلاً من direct cast لتجنب أخطاء type casting
+      if (cleanedControl['value'] is Map<String, dynamic>) {
+        final valueMap = cleanedControl['value'] as Map<String, dynamic>;
+        
+        if (valueMap['files'] is List && 
+            (valueMap['files'] as List).isNotEmpty &&
+            valueMap.containsKey('foldername')) {
+          
+          valueMap.remove('foldername'); // إزالة من value
+        }
+      }
+      
+      cleanedControl.remove('foldername'); // إزالة من المستوى الأعلى
+      return cleanedControl;
+    }).toList();
+
+    final payload = {'id': form.id, 'controls': cleanedControls, 'foldername': folderName};
 
     return payload;
   }
@@ -409,7 +447,7 @@ class FormController extends GetxController {
   }
 
   /// بناء أداة جدول للإرسال
-  Map<String, dynamic> _buildTableControlForSubmit(ControlModel tableControl) {
+  Map<String, dynamic> _buildTableControlForSubmit(ControlModel tableControl)  {
     final rows = <Map<String, dynamic>>[];
     final rowCount = tableRowCounts[tableControl.id] ?? 1;
 
@@ -424,7 +462,7 @@ class FormController extends GetxController {
         // في التطبيق الكامل، ستحتاج لتتبع قيم كل صف منفصلة
         rowControls.add({
           'id': childControl.id,
-          'value': _processControlValue(values[childControl.id], childControl),
+          'value':  _processControlValue(values[childControl.id], childControl),
         });
       }
 
@@ -441,6 +479,8 @@ class FormController extends GetxController {
 
     // معالجة أدوات الملفات
     if (control.type == 7) {
+      // الملفات تم رفعها بالفعل في buildSubmitPayload
+      // هنا فقط نقوم بتنسيق البيانات للإرسال
       if (value is Map<String, dynamic>) {
         return {
           'files': value['files'] ?? [],
@@ -470,10 +510,10 @@ class FormController extends GetxController {
       isSubmitting.value = true;
 
       // بناء payload
-      final payload = buildSubmitPayload();
+      final payload = await buildSubmitPayload();
 
       // print('\n🚀 بدء إرسال النموذج:');
-      // print('📋 Payload: ${jsonEncode(payload)}');
+      print('📋 Payload: ${jsonEncode(payload)}');
 
       // إرسال للـ API
       final response = await ApiClient.instance.submitForm(payload);

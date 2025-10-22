@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -260,13 +259,13 @@ class _FileControlState extends State<FileControl> {
       final f = result.files.first;
       final bytes = f.bytes;
       if (bytes != null) {
-        final b64 = base64Encode(bytes);
+        // final b64 = base64Encode(bytes);
         // إضافة مسار المجلد إلى مسار الملف إذا كان مجلد مختار
         String filePath = f.name;
         if (selectedFolderPath != null && selectedFolderPath!.isNotEmpty) {
           filePath = '$selectedFolderPath/$filePath';
         }
-        files.add({'base64': b64, 'path': filePath});
+        files.add({'name': f.name, 'base64': f.path, 'local_path': f.path, 'path': filePath});
         _sync();
       }
     }

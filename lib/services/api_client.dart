@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:useshareflowpublicapiflutter/help/funcs.dart';
 import '../config.dart';
 import '../models/form_models.dart';
 import '../models/request_payloads.dart';
@@ -45,7 +46,10 @@ class ApiClient {
         .timeout(AppConfig.httpTimeout);
     if (res.statusCode == 200) {
       final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
-      return FormStructureModel.fromJson(data);
+      final result = FormStructureModel.fromJson(data);
+      Funcs.form_model = result;
+      Funcs.form_id = result.id ;
+      return result; 
     }
     throw Exception('فشل جلب هيكل النموذج (${res.statusCode})');
   }
@@ -108,7 +112,7 @@ class ApiClient {
 
     print('   Response Status: ${res.statusCode}');
 
-    if (res.statusCode == 200) {
+    if (res.statusCode == 202) {
       final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
       return data;
     }
