@@ -5,6 +5,8 @@ import 'package:get/get.dart';
 import 'package:useshareflowpublicapiflutter/minio/MinIOClass.dart';
 import '../models/form_models.dart';
 import '../services/api_client.dart';
+import '../services/task_status_service.dart';
+import '../ui/widgets/task_status_dialog.dart';
 
 class FormController extends GetxController {
   // القائمة المعروضة بعد الفلترة
@@ -512,18 +514,26 @@ class FormController extends GetxController {
       // بناء payload
       final payload = await buildSubmitPayload();
 
-      // print('\n🚀 بدء إرسال النموذج:');
-      print('📋 Payload: ${jsonEncode(payload)}');
+      // print('📋 Payload: ${jsonEncode(payload)}');
 
-      // إرسال للـ API
+    
       final response = await ApiClient.instance.submitForm(payload);
-      print('✅ تم الإرسال بنجاح: $response');
-      Get.snackbar(
-        'نجح الإرسال',
-        'تم إرسال النموذج بنجاح',
-        backgroundColor: Colors.green.withOpacity(0.8),
-        colorText: Colors.white,
-      );
+   
+      print("reponsed: ${jsonEncode(response)}");
+      
+      final taskStatusService = TaskStatusService.instance;
+      final taskResult = await taskStatusService.checkSubmissionStatus(response);
+
+      if (taskResult.status == TaskStatus.success) {
+       
+        _showSuccessMessage(taskResult.applyId!);
+      } else if (taskResult.status == TaskStatus.pending && taskResult.taskId != null) {
+        
+        await _handleAsyncTask(taskResult.taskId!);
+      } else {
+       
+        throw Exception(taskResult.errorMessage ?? 'خطأ غير معروف في الإرسال');
+      }
     } catch (e) {
       print('❌ خطأ في الإرسال: $e');
       Get.snackbar(
@@ -531,9 +541,39 @@ class FormController extends GetxController {
         e.toString(),
         backgroundColor: Colors.red.withOpacity(0.8),
         colorText: Colors.white,
+        duration: const Duration(seconds: 5),
       );
     } finally {
       isSubmitting.value = false;
     }
+  }
+
+
+  Future<void> _handleAsyncTask(String taskId) async {
+    final context = Get.context;
+    if (context == null) {
+      throw Exception('لا يمكن عرض dialog المتابعة');
+    }
+
+
+    final result = await TaskStatusDialog.show(
+      context: context,
+      taskId: taskId,
+    );
+
+    if (result.isSuccess && result.applyId != null) {
+      _showSuccessMessage(result.applyId!);
+    }
+  }
+
+
+  void _showSuccessMessage(int applyId) {
+    Get.snackbar(
+      'نجح الإرسال',
+      'تم إرسال النموذج بنجاح\nرقم التطبيق: $applyId',
+      backgroundColor: Colors.green.withOpacity(0.8),
+      colorText: Colors.white,
+      duration: const Duration(seconds: 4),
+    );
   }
 }

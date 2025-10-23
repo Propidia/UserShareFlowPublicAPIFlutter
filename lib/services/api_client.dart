@@ -112,10 +112,28 @@ class ApiClient {
 
     print('   Response Status: ${res.statusCode}');
 
-    if (res.statusCode == 202) {
+    if (res.statusCode == 200) {
       final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
       return data;
     }
     throw Exception('فشل إرسال النموذج (${res.statusCode}): ${res.body}');
+  }
+  /// التحقق من حالة المهمة باستخدام task_id أو correlation_id
+  Future<String> checkTaskStatus(String taskId) async {
+    try {
+      final uri = _uri('/and_sch/check_task_status', {
+        'task_id': taskId,
+      });
+      final res = await http
+          .get(uri, headers: _headers)
+          .timeout(AppConfig.httpTimeout);
+      
+      if (res.statusCode == 200) {
+        return utf8.decode(res.bodyBytes);
+      }
+      throw Exception('فشل التحقق من حالة المهمة (${res.statusCode})');
+    } catch (e) {
+      throw Exception('خطأ في التحقق من حالة المهمة: ${e.toString()}');
+    }
   }
 }

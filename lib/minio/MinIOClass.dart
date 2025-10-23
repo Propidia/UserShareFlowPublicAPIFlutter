@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:minio/io.dart';
 import 'package:minio/minio.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:useshareflowpublicapiflutter/help/funcs.dart';
 import 'package:useshareflowpublicapiflutter/models/form_models.dart';
 import 'package:useshareflowpublicapiflutter/models/storage_models.dart';
@@ -407,11 +409,8 @@ class MinIOClass {
       });
 
       print('Found ${filesToUpload.length} files to upload');
-      if (filesToUpload.isEmpty) {
-        return (res, folder_name);
-      }
 
-      // توليد اسم مجلد رئيسي واحد للدفعة
+      // توليد اسم مجلد رئيسي واحد للدفعة (حتى لو لم تكن هناك ملفات)
       String platform = 'win';
       if (Platform.isAndroid) platform = 'and';
       else if (Platform.isFuchsia) platform = 'web';
@@ -425,6 +424,7 @@ class MinIOClass {
       int errorCount = 0;
       final uuid = Uuid();
 
+      // رفع الملفات إن وُجدت
       for (final item in filesToUpload) {
         final Map<String, dynamic> file = item['file'] as Map<String, dynamic>;
         final Map<String, dynamic> values = item['values'] as Map<String, dynamic>;
@@ -489,6 +489,35 @@ class MinIOClass {
         res = 'success';
       } else if (errorCount > 0) {
         res = 'no files uploaded';
+      }
+
+      // إنشاء ملف JSON بالبيانات حتى لو لم تكن هناك ملفات
+      try {
+        print('📝 إنشاء ملف JSON بالبيانات...');
+        
+        // تحويل البيانات إلى JSON
+        final jsonData = jsonEncode(formControlsValues);
+        
+        // إنشاء ملف مؤقت
+        final tempDir = await getTemporaryDirectory();
+        final jsonFile = File('${tempDir.path}/form_data_$folder_name.json');
+        await jsonFile.writeAsString(jsonData, encoding: utf8);
+        
+        // رفع ملف JSON إلى MinIO
+        final jsonObjectPath = '$folder_name/form_data.json';
+        await _minio.fPutObject(
+          bucketName,
+          jsonObjectPath,
+          jsonFile.path,
+        );
+        
+        print('✅ تم رفع ملف JSON بنجاح: $jsonObjectPath');
+        
+        // حذف الملف المؤقت
+        await jsonFile.delete();
+      } catch (jsonError) {
+        print('⚠️ تحذير: فشل إنشاء ملف JSON: $jsonError');
+        // لا نرمي خطأ هنا لأننا لا نريد إيقاف العملية
       }
 
       print('✅ All files uploaded successfully!');
@@ -666,7 +695,7 @@ class MinIOClass {
       // حصر الملفات الجديدة/المعدلة من جميع عناصر التحكم
       List<Map<String, dynamic>> filesToUpload = [];
 
-      for (var control in form.controls ?? []) {
+      for (var control in form.controls) {
         if (control.type == 7 && control.files != null) {
           for (var file in control.files!) {
             // تحديد الملفات التي تحتاج رفع
