@@ -7,28 +7,28 @@ class TaskStatusDialog extends StatelessWidget {
   final String? taskId;
   final Future<int?> Function()? pollFunction;
 
-  const TaskStatusDialog({
-    Key? key,
-    this.taskId,
-    this.pollFunction,
-  }) : super(key: key);
+  const TaskStatusDialog({Key? key, this.taskId, this.pollFunction})
+    : super(key: key);
 
   /// عرض dialog مع متابعة حالة المهمة
   static Future<TaskStatusResult> show({
     required BuildContext context,
     required String taskId,
+    String? accessToken,
   }) async {
-    final statusController = TaskStatusDialogController(taskId: taskId);
-    
+    final statusController = TaskStatusDialogController(
+      taskId: taskId,
+      accessToken: accessToken,
+    );
+
     // بدء المتابعة
     statusController.startPolling();
 
     final result = await showDialog<TaskStatusResult>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => _TaskStatusDialogContent(
-        controller: statusController,
-      ),
+      builder: (context) =>
+          _TaskStatusDialogContent(controller: statusController),
     );
 
     // التأكد من إيقاف المتابعة
@@ -46,13 +46,14 @@ class TaskStatusDialog extends StatelessWidget {
 /// Controller لإدارة حالة Dialog
 class TaskStatusDialogController extends GetxController {
   final String taskId;
+  final String? accessToken;
   final statusMessage = '⏳ جاري إرسال النموذج...'.obs;
   final isLoading = true.obs;
   final hasError = false.obs;
   final errorMessage = ''.obs;
   int? resultApplyId;
 
-  TaskStatusDialogController({required this.taskId});
+  TaskStatusDialogController({required this.taskId, this.accessToken});
 
   Future<void> startPolling() async {
     try {
@@ -62,6 +63,7 @@ class TaskStatusDialogController extends GetxController {
 
       final applyId = await TaskStatusService.instance.pollTaskStatus(
         taskId,
+        accessToken: accessToken,
         onStatusUpdate: (message) {
           statusMessage.value = message;
         },
@@ -72,7 +74,7 @@ class TaskStatusDialogController extends GetxController {
         statusMessage.value = '✅ تم إرسال النموذج بنجاح!';
         isLoading.value = false;
         hasError.value = false;
-        
+
         // إغلاق تلقائي بعد ثانية
         await Future.delayed(const Duration(seconds: 1));
         Get.back(result: TaskStatusResult.success(applyId));
@@ -99,10 +101,8 @@ class TaskStatusDialogController extends GetxController {
 class _TaskStatusDialogContent extends StatelessWidget {
   final TaskStatusDialogController controller;
 
-  const _TaskStatusDialogContent({
-    Key? key,
-    required this.controller,
-  }) : super(key: key);
+  const _TaskStatusDialogContent({Key? key, required this.controller})
+    : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -126,11 +126,7 @@ class _TaskStatusDialogContent extends StatelessWidget {
                 ),
                 const SizedBox(height: 20),
               ] else if (controller.hasError.value) ...[
-                const Icon(
-                  Icons.error_outline,
-                  color: Colors.red,
-                  size: 50,
-                ),
+                const Icon(Icons.error_outline, color: Colors.red, size: 50),
                 const SizedBox(height: 20),
               ] else ...[
                 const Icon(
@@ -145,7 +141,8 @@ class _TaskStatusDialogContent extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 14),
               ),
-              if (controller.hasError.value && controller.errorMessage.isNotEmpty) ...[
+              if (controller.hasError.value &&
+                  controller.errorMessage.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.all(8),
@@ -156,10 +153,7 @@ class _TaskStatusDialogContent extends StatelessWidget {
                   child: Text(
                     controller.errorMessage.value,
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.red.shade700,
-                    ),
+                    style: TextStyle(fontSize: 12, color: Colors.red.shade700),
                   ),
                 ),
               ],
@@ -178,11 +172,13 @@ class _TaskStatusDialogContent extends StatelessWidget {
             ] else if (!controller.isLoading.value) ...[
               ElevatedButton(
                 onPressed: () {
-                  Get.back(result: TaskStatusResult.success(controller.resultApplyId!));
+                  Get.back(
+                    result: TaskStatusResult.success(controller.resultApplyId!),
+                  );
                 },
                 child: const Text('موافق'),
               ),
-            ]
+            ],
           ],
         ),
       );
@@ -195,10 +191,7 @@ class TaskStatusResult {
   final TaskDialogStatus status;
   final int? applyId;
 
-  TaskStatusResult._({
-    required this.status,
-    this.applyId,
-  });
+  TaskStatusResult._({required this.status, this.applyId});
 
   factory TaskStatusResult.success(int applyId) {
     return TaskStatusResult._(
@@ -208,17 +201,11 @@ class TaskStatusResult {
   }
 
   factory TaskStatusResult.cancelled() {
-    return TaskStatusResult._(
-      status: TaskDialogStatus.cancelled,
-    );
+    return TaskStatusResult._(status: TaskDialogStatus.cancelled);
   }
 
   bool get isSuccess => status == TaskDialogStatus.success;
   bool get isCancelled => status == TaskDialogStatus.cancelled;
 }
 
-enum TaskDialogStatus {
-  success,
-  cancelled,
-}
-
+enum TaskDialogStatus { success, cancelled }

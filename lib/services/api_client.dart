@@ -26,7 +26,7 @@ class ApiClient {
   Future<List<Map<String, dynamic>>> fetchForms() async {
     print('Headers being sent: $_headers');
 
-    final uri = _uri('/Get_IDs_Names_Of_Released_Entry');
+    final uri = _uri('api/Get_IDs_Names_Of_Released_Entry');
     final res = await http
         .get(uri, headers: _headers)
         .timeout(AppConfig.httpTimeout);
@@ -38,7 +38,7 @@ class ApiClient {
   }
 
   Future<FormStructureModel> fetchFormStructure(int formId) async {
-    final uri = _uri('/Bring_TheControls_Of_Released_EntryForm', {
+    final uri = _uri('api/Bring_TheControls_Of_Released_EntryForm', {
       'form_id': formId.toString(),
     });
     final res = await http
@@ -48,8 +48,8 @@ class ApiClient {
       final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
       final result = FormStructureModel.fromJson(data);
       Funcs.form_model = result;
-      Funcs.form_id = result.id ;
-      return result; 
+      Funcs.form_id = result.id;
+      return result;
     }
     throw Exception('فشل جلب هيكل النموذج (${res.statusCode})');
   }
@@ -60,7 +60,7 @@ class ApiClient {
     List<Map<String, dynamic>> items = [];
 
     final query = req.toQuery();
-    final uri = _uri('/GetDataForm', query);
+    final uri = _uri('api/GetDataForm', query);
     final res = await http
         .get(uri, headers: _headers)
         .timeout(AppConfig.httpTimeout);
@@ -91,7 +91,7 @@ class ApiClient {
 
   Future<Map<String, dynamic>> getDataForm(GetDataFormRequest req) async {
     final query = req.toQuery();
-    final uri = _uri('/GetDataForm', query);
+    final uri = _uri('api/GetDataForm', query);
     final res = await http
         .get(uri, headers: _headers)
         .timeout(AppConfig.httpTimeout);
@@ -118,16 +118,24 @@ class ApiClient {
     }
     throw Exception('فشل إرسال النموذج (${res.statusCode}): ${res.body}');
   }
+
   /// التحقق من حالة المهمة باستخدام task_id أو correlation_id
-  Future<String> checkTaskStatus(String taskId) async {
+  Future<String> checkTaskStatus(String taskId, {String? accessToken}) async {
     try {
-      final uri = _uri('/and_sch/check_task_status', {
-        'task_id': taskId,
-      });
+      final uri = _uri('and_sch/check_task_status', {'task_id': taskId});
+
+      // استخدام Authorization header فقط عند توفر accessToken
+      final headers = accessToken != null
+          ? {
+              'Content-Type': 'application/json; charset=utf-8',
+              'Authorization': 'Bearer $accessToken',
+            }
+          : _headers;
+
       final res = await http
-          .get(uri, headers: _headers)
+          .get(uri, headers: headers)
           .timeout(AppConfig.httpTimeout);
-      
+
       if (res.statusCode == 200) {
         return utf8.decode(res.bodyBytes);
       }
