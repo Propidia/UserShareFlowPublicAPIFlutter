@@ -1,7 +1,7 @@
 class AppConfig {
   AppConfig._();
 
-  static const String baseUrl = 'http://localhost:7000';
+  static const String baseUrl = 'http://localhost:8001/api';
   // static const String baseUrl = 'http://84.247.170.51/api';
   static const String apiKey = 'a9198549a3b00949355a09d2a';
   // static const String apiKey = '21761aa2457002e83953701a0';
