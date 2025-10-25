@@ -144,4 +144,33 @@ class ApiClient {
       throw Exception('خطأ في التحقق من حالة المهمة: ${e.toString()}');
     }
   }
+
+  /// البحث عن أول تطابق لاسم المجلد المحلل
+  Future<Map<String, dynamic>> getFirstMatch(String parsedFolderName) async {
+    try {
+      final uri = _uri('api/GetFirstMatch', {
+        'folderName': parsedFolderName,
+      });
+
+      final res = await http
+          .get(uri, headers: _headers)
+          .timeout(AppConfig.httpTimeout);
+
+      if (res.statusCode == 200) {
+        final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
+        return data;
+      }
+
+      // Handle different status codes
+      if (res.statusCode == 404) {
+        throw Exception('لم يتم العثور على تطابق للمجلد: $parsedFolderName');
+      }
+
+      throw Exception(
+          'فشل البحث عن تطابق للمجلد (${res.statusCode}): ${res.body}');
+    } catch (e) {
+      if (e is Exception) rethrow;
+      throw Exception('خطأ في البحث عن تطابق: ${e.toString()}');
+    }
+  }
 }

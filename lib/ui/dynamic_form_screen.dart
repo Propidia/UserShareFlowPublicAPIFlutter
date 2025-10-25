@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../controllers/form_controller.dart';
+import '../controllers/folder_processing_controller.dart';
 import '../models/form_models.dart';
 import 'controls/control_factory.dart';
 
@@ -15,10 +16,13 @@ class DynamicFormScreen extends StatefulWidget {
 
 class _DynamicFormScreenState extends State<DynamicFormScreen> {
   final formController = Get.find<FormController>();
+  late final FolderProcessingController folderController;
 
   @override
   void initState() {
     super.initState();
+    // Initialize controllers
+    folderController = Get.put(FolderProcessingController());
     formController.loadFormStructure(widget.formId);
   }
 
@@ -37,6 +41,34 @@ class _DynamicFormScreenState extends State<DynamicFormScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // Folder Processing Button
+              Obx(
+                () => ElevatedButton.icon(
+                  onPressed: folderController.isProcessing.value
+                      ? null
+                      : () => folderController.pickAndProcessFolder(),
+                  icon: folderController.isProcessing.value
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.folder_open),
+                  label: folderController.isProcessing.value
+                      ? Text(
+                          'جاري المعالجة... (${folderController.processedCount.value}/${folderController.processedCount.value + 1})')
+                      : const Text('معالجة مجلد'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
               Text(form.name, style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 12),
               ...form.controls
