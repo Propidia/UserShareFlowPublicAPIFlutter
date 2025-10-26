@@ -52,48 +52,61 @@ class TaskStatusDialogController extends GetxController {
   final hasError = false.obs;
   final errorMessage = ''.obs;
   int? resultApplyId;
-
+  CancelToken? cancelToken;
   TaskStatusDialogController({required this.taskId, this.accessToken});
 
-  Future<void> startPolling() async {
-    try {
-      statusMessage.value = '⏳ جاري إرسال النموذج...';
-      isLoading.value = true;
+ Future<void> startPolling() async {
+  try {
+    statusMessage.value = '⏳ جاري إرسال النموذج...';
+    isLoading.value = true;
+    hasError.value = false;
+
+    cancelToken = CancelToken();
+
+    final applyId = await TaskStatusService.instance.pollTaskStatus(
+      taskId,
+      accessToken: accessToken,
+      cancelToken: cancelToken,
+      onStatusUpdate: (message) {
+        statusMessage.value = message;
+      },
+    );
+
+    if (applyId != null && applyId > 0) {
+      resultApplyId = applyId;
+      statusMessage.value = '✅ تم إرسال النموذج بنجاح!';
+      isLoading.value = false;
       hasError.value = false;
 
-      final applyId = await TaskStatusService.instance.pollTaskStatus(
-        taskId,
-        accessToken: accessToken,
-        onStatusUpdate: (message) {
-          statusMessage.value = message;
-        },
-      );
-
-      if (applyId != null && applyId > 0) {
-        resultApplyId = applyId;
-        statusMessage.value = '✅ تم إرسال النموذج بنجاح!';
-        isLoading.value = false;
-        hasError.value = false;
-
-        // إغلاق تلقائي بعد ثانية
-        await Future.delayed(const Duration(seconds: 1));
-        Get.back(result: TaskStatusResult.success(applyId));
-      }
-    } catch (e) {
-      print('[TaskStatusDialog] Error: $e');
-      statusMessage.value = '❌ فشل الإرسال';
-      errorMessage.value = e.toString();
-      isLoading.value = false;
-      hasError.value = true;
+      await Future.delayed(const Duration(seconds: 1));
+      Get.back(result: TaskStatusResult.success(applyId));
     }
+  } catch (e) {
+    print('[TaskStatusDialog] Error: $e');
+    statusMessage.value = '❌ فشل الإرسال';
+    errorMessage.value = e.toString();
+    isLoading.value = false;
+    hasError.value = true;
   }
+}
 
   void retry() {
+  
+    if (isLoading.value) return;
     startPolling();
   }
 
   void cancel() {
+  
+    cancelToken?.cancel();
     Get.back(result: TaskStatusResult.cancelled());
+  }
+
+  @override
+  void onClose() {
+   
+    cancelToken?.cancel();
+    super.onClose();
   }
 }
 

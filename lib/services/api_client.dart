@@ -27,6 +27,7 @@ class ApiClient {
     print('Headers being sent: $_headers');
 
     final uri = _uri('api/Get_IDs_Names_Of_Released_Entry');
+    print('URI: $uri');
     final res = await http
         .get(uri, headers: _headers)
         .timeout(AppConfig.httpTimeout);
@@ -47,6 +48,7 @@ class ApiClient {
     if (res.statusCode == 200) {
       final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
       final result = FormStructureModel.fromJson(data);
+      // print('Form Structure: ${res.body}');
       Funcs.form_model = result;
       Funcs.form_id = result.id;
       return result;
@@ -77,7 +79,7 @@ class ApiClient {
               .toList();
         }
         if (items.isNotEmpty) {
-          print('[API] first connected option: ${items.first}');
+          // print('[API] first connected option: ${items}');s
         } else {
           print('[API] connected options empty');
         }
@@ -95,6 +97,7 @@ class ApiClient {
     final res = await http
         .get(uri, headers: _headers)
         .timeout(AppConfig.httpTimeout);
+    // print('   Response Status: ${res.body}');
     if (res.statusCode == 200) {
       final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
       return data;
@@ -145,32 +148,40 @@ class ApiClient {
     }
   }
 
-  /// البحث عن أول تطابق لاسم المجلد المحلل
-  Future<Map<String, dynamic>> getFirstMatch(String parsedFolderName) async {
-    try {
-      final uri = _uri('api/GetFirstMatch', {
-        'folderName': parsedFolderName,
-      });
+  Future<Map<String, dynamic>> getFirstMatch({
+  required int formId,
+  required int controlId,
+  required String value,
+  String? colName,
+}) async {
+  try {
 
-      final res = await http
-          .get(uri, headers: _headers)
-          .timeout(AppConfig.httpTimeout);
+    final uri = _uri(
+      'api/GetFirstMatch',
+       {
+        'form_id': formId.toString(),
+        'control_id': controlId.toString(),
+        'value': '%$value%',           
+        if (colName != null && colName.isNotEmpty) 'col_name': colName,
+      },
+    );
 
-      if (res.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
-        return data;
-      }
+    // POST بدون body (يكفي الهيدر)
+    final res = await http.post(uri, headers: _headers).timeout(AppConfig.httpTimeout);
 
-      // Handle different status codes
-      if (res.statusCode == 404) {
-        throw Exception('لم يتم العثور على تطابق للمجلد: $parsedFolderName');
-      }
-
-      throw Exception(
-          'فشل البحث عن تطابق للمجلد (${res.statusCode}): ${res.body}');
-    } catch (e) {
-      if (e is Exception) rethrow;
-      throw Exception('خطأ في البحث عن تطابق: ${e.toString()}');
+    if (res.statusCode == 200) {
+      return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     }
+    if (res.statusCode == 400) {
+      final errorData = jsonDecode(res.body);
+      throw Exception(errorData['error'] ?? 'خطأ في البحث');
+    }
+    if (res.statusCode == 401) throw Exception('API KEY غير صالح');
+    if (res.statusCode == 404) throw Exception('لم يتم العثور على تطابق');
+
+    throw Exception('فشل البحث عن تطابق (${res.statusCode}): ${res.body}');
+  } catch (e) {
+    throw Exception('خطأ في البحث عن تطابق: $e');
   }
+}
 }

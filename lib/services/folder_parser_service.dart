@@ -2,10 +2,23 @@ import '../models/folder_parsing_models.dart';
 
 /// Service for parsing folder names according to the pattern:
 /// Pattern: XX + (XX-XXXX) + (T?) + (1-99999+) + (YYYY)
-/// Example: SAPMT12342025 → SA/PM/T/1234/2025
+/// 
+/// Examples:
+/// - SAPMT12342025 → SA/PM/T/1234/2025
+/// - SAPM12342025 → SA/PM/1234/2025
+/// - IBBPMT12342025 → IBB/PM/T/1234/2025 (IBB is special 3-letter prefix)
+/// 
+/// Important:
+/// - T is a FLAG, not part of section
+/// - T flag only recognized when followed by a digit
+/// - IBB is the only city with 3-letter prefix
 class FolderParserService {
   /// Attempts to parse a folder name according to the pattern
   /// Returns null if the name doesn't match the pattern
+  /// 
+  /// Special cases:
+  /// - IBB is the only city with 3-letter prefix
+  /// - T is a flag, not part of section
   ParsedFolderName? parseFolderName(String folderName) {
     try {
       // Validate minimum length
@@ -16,18 +29,33 @@ class FolderParserService {
 
       int position = 0;
 
-      // 1. Extract prefix (first 2 characters - always letters)
-      if (position + 2 > folderName.length) return null;
-      final prefix = folderName.substring(position, position + 2);
-      if (!_isAllLetters(prefix)) return null;
-      position += 2;
+      // 1. Extract prefix (2 characters, or 3 for IBB exception)
+      String prefix;
+      if (folderName.startsWith('IBB') && folderName.length >= 3) {
+        // Special case: IBB has 3-letter prefix
+        prefix = folderName.substring(0, 3);
+        position = 3;
+      } else {
+        // Normal case: 2-letter prefix
+        if (position + 2 > folderName.length) return null;
+        prefix = folderName.substring(position, position + 2);
+        if (!_isAllLetters(prefix)) return null;
+        position += 2;
+      }
 
-      // 2. Extract section (2-4 letters)
+      // 2. Extract section (2-4 letters, but NOT including T flag)
       String section = '';
       int sectionLength = 0;
-      for (int i = 0; i < 3 && position + i < folderName.length; i++) {
+      for (int i = 0; i < 4 && position + i < folderName.length; i++) {
         final char = folderName[position + i];
         if (_isLetter(char)) {
+          // Check if this might be the T flag (T followed by digit)
+          if (char == 'T' && 
+              position + i + 1 < folderName.length && 
+              _isDigit(folderName[position + i + 1])) {
+            // This is likely the T flag, stop here
+            break;
+          }
           section += char;
           sectionLength++;
         } else {
@@ -38,9 +66,12 @@ class FolderParserService {
       if (sectionLength < 2 || sectionLength > 4) return null;
       position += sectionLength;
 
-      // 3. Check for optional 'T' flag
+      // 3. Check for optional 'T' flag (only if followed by a digit)
       String? tFlag;
-      if (position < folderName.length && folderName[position] == 'T') {
+      if (position < folderName.length && 
+          folderName[position] == 'T' &&
+          position + 1 < folderName.length &&
+          _isDigit(folderName[position + 1])) {
         tFlag = 'T';
         position++;
       }
@@ -97,6 +128,11 @@ class FolderParserService {
     return RegExp(r'^[a-zA-Z]$').hasMatch(char);
   }
 
+  /// Checks if a single character is a digit
+  bool _isDigit(String char) {
+    return RegExp(r'^\d$').hasMatch(char);
+  }
+
   /// Checks if a string contains only digits
   bool _isAllDigits(String str) {
     if (str.isEmpty) return false;
@@ -105,8 +141,12 @@ class FolderParserService {
 
   /// Validates that a parsed result makes sense
   bool validateParsedName(ParsedFolderName parsed) {
-    // Prefix should be 2 letters
-    if (parsed.prefix.length != 2) return false;
+    // Prefix should be 2 letters (or 3 for IBB)
+    if (parsed.prefix == 'IBB') {
+      if (parsed.prefix.length != 3) return false;
+    } else {
+      if (parsed.prefix.length != 2) return false;
+    }
 
     // Section should be 2-4 letters
     if (parsed.section.length < 2 || parsed.section.length > 4) return false;

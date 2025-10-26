@@ -46,7 +46,7 @@ class ParsedFolderName {
 }
 
 /// Record for failed folder processing
-class FailureRecord {
+class Record {
   /// Original folder name
   final String originalName;
 
@@ -61,8 +61,7 @@ class FailureRecord {
 
   /// Full path to the folder
   final String folderPath;
-
-  FailureRecord({
+Record({
     required this.originalName,
     this.parsedName,
     required this.errorMessage,
@@ -78,7 +77,7 @@ class FailureRecord {
         'folderPath': folderPath,
       };
 
-  factory FailureRecord.fromJson(Map<String, dynamic> json) => FailureRecord(
+  factory Record.fromJson(Map<String, dynamic> json) => Record(
         originalName: json['originalName'] as String,
         parsedName: json['parsedName'] as String?,
         errorMessage: json['errorMessage'] as String,
@@ -89,7 +88,7 @@ class FailureRecord {
 
 /// Container for multiple failure records
 class FailuresData {
-  final List<FailureRecord> failures;
+  final List<Record> failures;
 
   FailuresData({required this.failures});
 
@@ -99,8 +98,23 @@ class FailuresData {
 
   factory FailuresData.fromJson(Map<String, dynamic> json) => FailuresData(
         failures: (json['failures'] as List<dynamic>)
-            .map((f) => FailureRecord.fromJson(f as Map<String, dynamic>))
+            .map((f) => Record.fromJson(f as Map<String, dynamic>))
             .toList(),
       );
 }
 
+class SuccessData {
+  final List<Record> successes;
+
+  SuccessData({required this.successes});
+
+  Map<String, dynamic> toJson() => {
+        'successes': successes.map((s) => s.toJson()).toList(),
+      };
+
+  factory SuccessData.fromJson(Map<String, dynamic> json) => SuccessData(
+        successes: (json['successes'] as List<dynamic>)
+            .map((s) => Record.fromJson(s as Map<String, dynamic>))
+            .toList(),
+      );
+} 

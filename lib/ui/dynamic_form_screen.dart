@@ -23,6 +23,8 @@ class _DynamicFormScreenState extends State<DynamicFormScreen> {
     super.initState();
     // Initialize controllers
     folderController = Get.put(FolderProcessingController());
+    // ربط FormController بـ FolderController لتحديث قيم النموذج
+    folderController.setFormController(formController);
     formController.loadFormStructure(widget.formId);
   }
 
@@ -43,73 +45,101 @@ class _DynamicFormScreenState extends State<DynamicFormScreen> {
             children: [
               // Folder Processing Button
               Obx(
-                () => ElevatedButton.icon(
-                  onPressed: folderController.isProcessing.value
-                      ? null
-                      : () => folderController.pickAndProcessFolder(),
-                  icon: folderController.isProcessing.value
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.folder_open),
-                  label: folderController.isProcessing.value
-                      ? Text(
-                          'جاري المعالجة... (${folderController.processedCount.value}/${folderController.processedCount.value + 1})')
-                      : const Text('معالجة مجلد'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(form.name, style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 12),
-              ...form.controls
-                  .map((c) => ControlFactory.buildControl(c, formController))
-                  .toList(),
-              const SizedBox(height: 24),
-              Obx(
-                () => SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    onPressed: formController.isSubmitting.value
-                        ? null
-                        : () => formController.submitForm(),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                    ),
-                    child: formController.isSubmitting.value
-                        ? const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
+                () => Column(
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: folderController.isProcessing.value
+                          ? null
+                          : () => folderController.pickAndProcessFolder(),
+                      icon: folderController.isProcessing.value
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
                               ),
-                              SizedBox(width: 8),
-                              Text('جاري الإرسال...'),
-                            ],
-                          )
-                        : const Text(
-                            'إرسال النموذج',
-                            style: TextStyle(fontSize: 16),
-                          ),
-                  ),
+                            )
+                          : const Icon(Icons.folder_open),
+                      label: folderController.isProcessing.value
+                          ? Text(
+                              'جاري المعالجة... (${folderController.processedCount.value}/${folderController.totalCount.value})')
+                          : const Text('معالجة مجلد'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                    if (folderController.isProcessing.value)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Column(
+                          children: [
+                            LinearProgressIndicator(
+                              value: folderController.totalCount.value > 0
+                                  ? folderController.processedCount.value /
+                                      folderController.totalCount.value
+                                  : 0,
+                              backgroundColor: Colors.grey[300],
+                              color: Colors.blue,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '✅ ${folderController.successCount.value} | ❌ ${folderController.failureCount.value}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
                 ),
               ),
+              // const SizedBox(height: 16),
+              // Text(form.name, style: Theme.of(context).textTheme.titleLarge),
+              // const SizedBox(height: 12),
+              // ...form.controls
+              //     .map((c) => ControlFactory.buildControl(c, formController))
+              //     .toList(),
+              // const SizedBox(height: 24),
+              // Obx(
+              //   () => SizedBox(
+              //     width: double.infinity,
+              //     height: 50,
+              //     child: ElevatedButton(
+              //       onPressed: formController.isSubmitting.value
+              //           ? null
+              //           : () => formController.submitForm(),
+              //       style: ElevatedButton.styleFrom(
+              //         backgroundColor: Colors.green,
+              //         foregroundColor: Colors.white,
+              //       ),
+              //       child: formController.isSubmitting.value
+              //           ? const Row(
+              //               mainAxisAlignment: MainAxisAlignment.center,
+              //               children: [
+              //                 SizedBox(
+              //                   width: 16,
+              //                   height: 16,
+              //                   child: CircularProgressIndicator(
+              //                     color: Colors.white,
+              //                     strokeWidth: 2,
+              //                   ),
+              //                 ),
+              //                 SizedBox(width: 8),
+              //                 Text('جاري الإرسال...'),
+              //               ],
+              //             )
+              //           : const Text(
+              //               'إرسال النموذج',
+              //               style: TextStyle(fontSize: 16),
+              //             ),
+              //     ),
+              //   ),
+              // ),
             ],
           ),
         );

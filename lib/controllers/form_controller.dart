@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:useshareflowpublicapiflutter/minio/MinIOClass.dart';
+import 'package:useshareflowpublicapiflutter/models/process_task.dart';
 import '../models/form_models.dart';
 import '../services/api_client.dart';
 import '../services/task_status_service.dart';
@@ -28,6 +29,8 @@ class FormController extends GetxController {
   final Map<int, List<int>> connectedDependencies = {};
   // تتبع عدد صفوف الجداول {tableControlId -> rowCount}
   final Map<int, int> tableRowCounts = {};
+  // تتبع المهمات المعالجة {taskId -> ProcessingTask}
+  final RxMap<int, ProcessingTask> tasks = <int, ProcessingTask>{}.obs;
 
   Future<void> loadForms() async {
     try {
@@ -323,6 +326,20 @@ class FormController extends GetxController {
   void clearValue(int controlId) {
     _clearValueAndDescendants(controlId, visited: <int>{});
     update();
+  }
+
+  /// Set value without validation checks (for bulk filling from API)
+  void setValueWithoutValidation(int controlId, dynamic value) {
+    values[controlId] = value;
+    // Don't call update() here - will be called once after all values are set
+  }
+
+  /// Force UI update after bulk changes
+  void forceUpdate() {
+    // Trigger rebuild for GetBuilder widgets
+    update();
+    // Trigger rebuild for Obx widgets listening to values
+    values.refresh();
   }
 
   Map<String, dynamic> buildControlValuesPayload() {

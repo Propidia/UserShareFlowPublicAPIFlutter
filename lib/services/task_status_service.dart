@@ -1,5 +1,13 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'api_client.dart';
+
+/// لإلغاء المتابعة من الـ UI (عند إغلاق الديالوغ مثلاً)
+class CancelToken {
+  bool _isCanceled = false;
+  void cancel() => _isCanceled = true;
+  bool get isCanceled => _isCanceled;
+}
 
 /// خدمة متابعة حالة المهام
 class TaskStatusService {
@@ -7,101 +15,105 @@ class TaskStatusService {
   static final TaskStatusService instance = TaskStatusService._();
 
   /// التحقق من حالة المهمة بشكل دوري
-  /// يرجع apply_id إذا نجحت المهمة
+  /// يرجّع apply_id إذا نجحت المهمة
   /// يرمي Exception إذا فشلت
-  /// يرجع null إذا كانت المهمة ما زالت قيد التنفيذ
+  /// يحاول عند أخطاء الشبكة بهدوء بدون إظهار عدّاد للمستخدم
   Future<int?> pollTaskStatus(
     String taskId, {
     String? accessToken,
-    Duration pollInterval = const Duration(seconds: 2),
-    int maxAttempts = 10, // 2 دقيقة كحد أقصى
+    Duration pollInterval = const Duration(seconds: 1),
+    Duration overallTimeout = const Duration(minutes: 2),
     Function(String)? onStatusUpdate,
+    CancelToken? cancelToken,
   }) async {
-    int attempts = 0;
+    final startedAt = DateTime.now();
 
-    while (attempts < maxAttempts) {
-      attempts++;
+    bool _timeoutOrCanceled() =>
+        (DateTime.now().difference(startedAt) >= overallTimeout) ||
+        (cancelToken?.isCanceled == true);
+
+    while (true) {
+      if (_timeoutOrCanceled()) {
+        throw Exception('انتهى وقت الانتظار. المهمة قد تحتاج وقتاً أطول.');
+      }
 
       try {
         final response = await ApiClient.instance.checkTaskStatus(
           taskId,
           accessToken: accessToken,
         );
+
         final responseStr = response.trim();
+        debugPrint('[TaskStatus] $responseStr');
 
-        print('[TaskStatus] Attempt $attempts: $responseStr');
-
-        // فحص إذا كانت قابلة للتحويل لرقم > 0 (نجاح)
+        // نجاح: رقم > 0
         final applyId = int.tryParse(responseStr);
         if (applyId != null && applyId > 0) {
           onStatusUpdate?.call('✅ تم الإرسال بنجاح');
           return applyId;
         }
 
-        // فحص إذا كانت حالة pending أو queued
-        final lowerResponse = responseStr.toLowerCase();
-        if (lowerResponse == 'null' ||
-            lowerResponse == 'none' ||
-            lowerResponse == 'queued' ||
-            lowerResponse == 'pending' ||
-            lowerResponse.isEmpty) {
-          onStatusUpdate?.call(
-            '⏳ المهمة قيد التنفيذ... (محاولة $attempts/$maxAttempts)',
-          );
+        // حالات الانتظار/الاصطفاف
+        final s = responseStr.toLowerCase();
+        final isPending = s.isEmpty ||
+            s == 'null' ||
+            s == 'none' ||
+            s == 'queued' ||
+            s == 'pending' ||
+            s == 'in_progress' ||
+            s == 'running' ||
+            s == 'processing' ||
+            s.contains('wait') ||
+            s.contains('queue');
+
+        if (isPending) {
+          onStatusUpdate?.call('⏳ المهمة قيد التنفيذ...');
           await Future.delayed(pollInterval);
           continue;
         }
 
-        // أي حالة أخرى تعتبر خطأ
+        // أي حالة أخرى تعتبر فشل منطقي من السيرفر
         throw Exception('خطأ في تنفيذ المهمة: $responseStr');
       } catch (e) {
+        // لو كان فشل منطقي صريح من السيرفر -> نرميه مباشرة
         if (e.toString().contains('خطأ في تنفيذ المهمة')) {
-          // خطأ من السيرفر
           rethrow;
         }
-        // خطأ في الاتصال - نحاول مرة أخرى
-        print('[TaskStatus] Connection error: $e');
-        onStatusUpdate?.call(
-          '⚠️ خطأ في الاتصال... (محاولة $attempts/$maxAttempts)',
-        );
+        // أخطاء الشبكة: إعادة محاولة هادئة
+        debugPrint('[TaskStatus] Connection error: $e');
+        onStatusUpdate?.call('⚠️ خطأ في الاتصال... يُعاد المحاولة');
         await Future.delayed(pollInterval);
       }
     }
-
-    // انتهى الوقت
-    throw Exception('انتهى وقت الانتظار. المهمة قد تحتاج وقتاً أطول.');
   }
 
   /// استخراج task_id أو correlation_id من استجابة submitForm
   String? extractTaskId(Map<String, dynamic> response) {
-    // البحث عن correlation_id في details أولاً
+    // البحث عن task داخل details
     if (response.containsKey('details') && response['details'] is Map) {
-      final details = response['details'] as Map<String, dynamic>;
-
-      // if (details.containsKey('correlation_id')) {
-      //   return details['correlation_id'] as String?;
-      // }
-
+      final details = (response['details'] as Map).cast<String, dynamic>();
       if (details.containsKey('task_id')) {
         final taskId = details['task_id'];
         return taskId?.toString();
       }
+      // لو احتجت لاحقاً:
+      // if (details.containsKey('correlation_id')) {
+      //   return details['correlation_id']?.toString();
+      // }
     }
 
-    // البحث عن correlation_id على المستوى الأعلى
+    // على المستوى الأعلى
     if (response.containsKey('correlation_id')) {
-      return response['correlation_id'] as String?;
+      return response['correlation_id']?.toString();
     }
-
-    // البحث عن task_id على المستوى الأعلى
     if (response.containsKey('task_id')) {
       final taskId = response['task_id'];
       return taskId?.toString();
     }
 
-    // قد يكون apply_id مباشرة (بدون task)
+    // نجاح فوري بدون task
     if (response.containsKey('apply_id')) {
-      return null; // لا يوجد task، العملية تمت مباشرة
+      return null;
     }
 
     return null;
@@ -109,20 +121,15 @@ class TaskStatusService {
 
   /// استخراج access_token من استجابة submitForm
   String? extractAccessToken(Map<String, dynamic> response) {
-    // البحث عن access_token في details
     if (response.containsKey('details') && response['details'] is Map) {
-      final details = response['details'] as Map<String, dynamic>;
-
+      final details = (response['details'] as Map).cast<String, dynamic>();
       if (details.containsKey('access_token')) {
         return details['access_token'] as String?;
       }
     }
-
-    // البحث عن access_token على المستوى الأعلى (احتياطي)
     if (response.containsKey('access_token')) {
       return response['access_token'] as String?;
     }
-
     return null;
   }
 
@@ -130,7 +137,7 @@ class TaskStatusService {
   Future<TaskResult> checkSubmissionStatus(
     Map<String, dynamic> response,
   ) async {
-    // فحص إذا كان هناك apply_id مباشرة (نجاح فوري)
+    // نجاح فوري
     if (response.containsKey('apply_id')) {
       final applyId = response['apply_id'];
       if (applyId is int && applyId > 0) {
@@ -138,17 +145,13 @@ class TaskStatusService {
       }
     }
 
-    // فحص إذا كان هناك task_id أو correlation_id (عملية غير متزامنة)
+    // مهمة غير متزامنة
     final taskId = extractTaskId(response);
     if (taskId == null || taskId.isEmpty) {
-      // لا يوجد task_id ولا apply_id - خطأ
       return TaskResult.error('لم يتم إرجاع task_id أو apply_id من السيرفر');
     }
 
-    // استخراج access_token للاستخدام في التحقق من الحالة
     final accessToken = extractAccessToken(response);
-
-    // العملية قيد التنفيذ - نحتاج للمتابعة
     return TaskResult.pending(taskId, accessToken);
   }
 }

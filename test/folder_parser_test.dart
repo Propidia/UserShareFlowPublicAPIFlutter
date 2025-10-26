@@ -87,6 +87,59 @@ void main() {
       expect(result.formatted, equals('SA/PM/T/99999/2025'));
     });
 
+    test('Parse IBB (3-letter prefix exception) with T flag', () {
+      // IBBPMT12342025 → IBB/PM/T/1234/2025
+      final result = parserService.parseFolderName('IBBPMT12342025');
+
+      expect(result, isNotNull);
+      expect(result!.prefix, equals('IBB'));
+      expect(result.section, equals('PM'));
+      expect(result.tFlag, equals('T'));
+      expect(result.number, equals('1234'));
+      expect(result.year, equals('2025'));
+      expect(result.formatted, equals('IBB/PM/T/1234/2025'));
+    });
+
+    test('Parse IBB without T flag', () {
+      // IBBPM12342025 → IBB/PM/1234/2025
+      final result = parserService.parseFolderName('IBBPM12342025');
+
+      expect(result, isNotNull);
+      expect(result!.prefix, equals('IBB'));
+      expect(result.section, equals('PM'));
+      expect(result.tFlag, isNull);
+      expect(result.number, equals('1234'));
+      expect(result.year, equals('2025'));
+      expect(result.formatted, equals('IBB/PM/1234/2025'));
+    });
+
+    test('Parse IBB with 3-letter section', () {
+      // IBBPMXT12342025 → IBB/PMX/T/1234/2025
+      final result = parserService.parseFolderName('IBBPMXT12342025');
+
+      expect(result, isNotNull);
+      expect(result!.prefix, equals('IBB'));
+      expect(result.section, equals('PMX'));
+      expect(result.tFlag, equals('T'));
+      expect(result.number, equals('1234'));
+      expect(result.year, equals('2025'));
+      expect(result.formatted, equals('IBB/PMX/T/1234/2025'));
+    });
+
+    test('T should be flag, not part of section (PMT with T flag)', () {
+      // SAPMTT12342025 should parse as SA/PMT/T/1234/2025, not SA/PM/TT/1234/2025
+      // But based on logic, PMT is section, then T is flag
+      final result = parserService.parseFolderName('SAPMTT12342025');
+
+      expect(result, isNotNull);
+      expect(result!.prefix, equals('SA'));
+      expect(result.section, equals('PMT'));
+      expect(result.tFlag, equals('T'));
+      expect(result.number, equals('1234'));
+      expect(result.year, equals('2025'));
+      expect(result.formatted, equals('SA/PMT/T/1234/2025'));
+    });
+
     test('Reject folder name that is too short', () {
       final result = parserService.parseFolderName('SAPM123');
       expect(result, isNull);
