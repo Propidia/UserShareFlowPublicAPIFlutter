@@ -6,22 +6,7 @@ import 'package:useshareflowpublicapiflutter/models/form_models.dart';
 class Funcs {
   Funcs._();
   
-  // ========================================
-  // إعدادات MinIO
-  // ========================================
-  
-  /// عنوان خادم MinIO
-  /// يمكن تغييره حسب البيئة (تطوير، إنتاج)
-  // static String minio_end_point = "84.247.170.51";
-  static const String minio_end_point = 'localhost';
-  static const int minio_port = 9000;
-  static String minio_access_key = "1a1bb32db3ea8fcd31e1a99ef";
-  static String minio_secret_key = "2f999116ccd2da8a57781d661";
-  // static const String minio_access_key = 'eyad';
-  // static const String minio_secret_key = 'StrongPass#2025!';
-  
-  /// يجب تفعيله في بيئة الإنتاج
-  static const bool minio_use_ssl = false;
+ 
   static int? form_id;
   static FormStructureModel? form_model;
   static int? user_id;
@@ -120,23 +105,23 @@ class Funcs {
     print(formattedMessage);
   }
   
-  /// التحقق من صحة بيانات MinIO
-  static bool validateMinIOConfig() {
-    return minio_end_point.isNotEmpty &&
-           minio_port > 0 &&
-           minio_access_key.isNotEmpty &&
-           minio_secret_key.isNotEmpty;
-  }
+  // /// التحقق من صحة بيانات MinIO
+  // static bool validateMinIOConfig() {
+  //   return minio_end_point.isNotEmpty &&
+  //          minio_port > 0 &&
+  //          minio_access_key.isNotEmpty &&
+  //          minio_secret_key.isNotEmpty;
+  // }
   
-  /// طباعة إعدادات MinIO (بدون كشف المفاتيح السرية)
-  static void printMinIOConfig() {
-    print('🔧 إعدادات MinIO:');
-    print('🌐 العنوان: $minio_end_point');
-    print('🔌 المنفذ: $minio_port');
-    print('🔐 استخدام SSL: $minio_use_ssl');
-    print('🔑 مفتاح الوصول: ${minio_access_key.substring(0, 3)}***');
-    print('🔒 المفتاح السري: ${minio_secret_key.substring(0, 3)}***');
-  }
+  // /// طباعة إعدادات MinIO (بدون كشف المفاتيح السرية)
+  // static void printMinIOConfig() {
+  //   print('🔧 إعدادات MinIO:');
+  //   print('🌐 العنوان: $minio_end_point');
+  //   print('🔌 المنفذ: $minio_port');
+  //   print('🔐 استخدام SSL: $minio_use_ssl');
+  //   print('🔑 مفتاح الوصول: ${minio_access_key.substring(0, 3)}***');
+  //   print('🔒 المفتاح السري: ${minio_secret_key.substring(0, 3)}***');
+  // }
 }
 
 /// إنشاء مثيل عام من Funcs للاستخدام في جميع أنحاء التطبيق

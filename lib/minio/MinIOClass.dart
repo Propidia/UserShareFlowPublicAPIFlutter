@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:minio/io.dart';
 import 'package:minio/minio.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:useshareflowpublicapiflutter/config.dart';
 import 'package:useshareflowpublicapiflutter/help/funcs.dart';
 import 'package:useshareflowpublicapiflutter/models/form_models.dart';
 import 'package:useshareflowpublicapiflutter/models/storage_models.dart';
@@ -14,11 +15,11 @@ class MinIOClass {
   // هذه هي معلومات الاتصال بخادم MinIO الخاص بك
   // (سواء كان على جهازك المحلي أو على خادم الإنتاج)
   Minio _minio = Minio(
-    endPoint: Funcs.minio_end_point, // e.g., 'localhost' or '192.168.1.10'
-    port: Funcs.minio_port,
-    accessKey: Funcs.minio_access_key,
-    secretKey: Funcs.minio_secret_key,
-    useSSL: Funcs.minio_use_ssl, // Set to true if you configured Nginx with SSL
+    endPoint: AppConfig.minio_end_point, // e.g., 'localhost' or '192.168.1.10'
+    port: AppConfig.minio_port,
+    accessKey: AppConfig.minio_access_key,
+    secretKey: AppConfig.minio_secret_key,
+    useSSL: AppConfig.minio_use_ssl, // Set to true if you configured Nginx with SSL
   );
   final bucketName = "applys";
 
@@ -105,9 +106,7 @@ class MinIOClass {
     }
   }
 
-
-  /// نسخة تعتمد على values مباشرة لتجنب الاعتماد على ControlModel.files
- Future<(String, String)> uploadFormFilesToMinIOValues(
+/* Future<(String, String)> uploadFormFilesToMinIOValues(
   Map<int, dynamic> formControlsValues,
   String folderName,
 ) async {
@@ -280,7 +279,203 @@ class MinIOClass {
 
   return (res, folder_name);
 }
+ */
+  /// نسخة تعتمد على values مباشرة لتجنب الاعتماد على ControlModel.files
 
+// يُفترض استيراد Minio هنا
+// يُفترض استيراد Uuid هنا
+// يُفترض استيراد getTemporaryDirectory هنا
+
+// ملاحظة: يجب تعريف bucketName و _minio و Funcs و SubmissionService
+// و _cleanMapForJson في نطاق يمكن الوصول إليه.
+
+// مثال تعريفي (يجب استبداله بالتعريف الفعلي في مشروعك)
+// const String bucketName = 'your-bucket-name';
+// final Minio _minio = Minio(endPoint: '...'); 
+// Map<String, dynamic> _cleanMapForJson(Map<String, dynamic> map) => map; 
+
+Future<(String, String)> uploadFormFilesToMinIOValues(
+    Map<int, dynamic> formControlsValues,
+    String folderName,
+) async {
+  String res = "success";
+  String folder_name = 'noFolder';
+  try {
+    print('Using bucket: $bucketName, prefix: $folderName');
+
+    // تحقق أو أنشئ الـ Bucket
+    bool found = await _minio.bucketExists(bucketName);
+    if (!found) {
+      await _minio.makeBucket(bucketName);
+      print('Bucket "$bucketName" created.');
+    }
+
+    // جمع الملفات من values مع تتبع الفهرس لضمان تعديل العنصر الصحيح
+    final List<Map<String, dynamic>> filesToUpload = <Map<String, dynamic>>[];
+    formControlsValues.forEach((controlId, value) {
+      
+      // 🚨 نقطة التصحيح الرئيسية: يجب أن تكون القيمة خريطة تحتوي على 'files'
+      if (value is! Map<String, dynamic>) {
+        print('⚠️ Skipping controlId $controlId: value is not a Map (${value.runtimeType})');
+        return;
+      }
+
+      final dynamic files = value['files'];
+      
+      if (files == null) {
+        print('⚠️ Skipping controlId $controlId: no files key');
+        return;
+      }
+
+      if (files is! List) {
+        // يتم تسجيل هذه الرسالة إذا كانت قيمة 'files' هي 'String' مثلاً
+        print('⚠️ Skipping controlId $controlId: files is not a List (${files.runtimeType})');
+        return;
+      }
+
+      for (int i = 0; i < files.length; i++) {
+        final dynamic f = files[i];
+        if (f is! Map<String, dynamic>) {
+          print('⚠️ Skipping file[$i]: not a Map (${f.runtimeType})');
+          continue;
+        }
+
+        // التحقق من أن الملف لم يتم رفعه مسبقاً (base64 لم يتم تحديثه إلى UUID أو foldername موجود)
+        final String? base64Value = (f['base64'] as String?)?.trim();
+        final bool alreadyUploaded = base64Value != null &&
+            (base64Value.contains('-') || value['foldername'] != null);
+
+        if (alreadyUploaded) {
+          print('⏭️ Skipping already uploaded file: ${f['name']} (base64: $base64Value)');
+          continue;
+        }
+
+        final String? candidate = (f['base64'] as String?)?.trim();
+        final bool looksRemote = candidate != null &&
+            (candidate.startsWith('http://') || candidate.startsWith('https://'));
+        
+        // التحقق من أن القيمة هي مسار محلي موجود للملف
+        final bool isLocal = candidate != null && candidate.isNotEmpty && !looksRemote && File(candidate).existsSync();
+        if (isLocal) {
+          filesToUpload.add({'file': f, 'values': value, 'fileIndex': i});
+        }
+      }
+    });
+
+    print('Found ${filesToUpload.length} files to upload');
+
+    // توليد اسم مجلد رئيسي واحد للدفعة
+    String platform = 'win';
+    if (Platform.isAndroid) platform = 'and';
+    else if (Platform.isFuchsia) platform = 'web';
+    else if (Platform.isWindows) platform = 'win';
+    else if (Platform.isLinux) platform = 'lin';
+    else if (Platform.isIOS) platform = 'ios';
+    else if (Platform.isMacOS) platform = 'mac';
+    // يُفترض أن Funcs.form_id مُعرّف ومتاح
+    folder_name = '${DateTime.now().millisecondsSinceEpoch}z${platform}z${Funcs.form_id}';
+
+    int uploadedCount = 0;
+    int errorCount = 0;
+    final uuid = Uuid(); // يُفترض أن Uuid مُعرف ومتاح
+
+    // رفع الملفات
+    for (final item in filesToUpload) {
+      final Map<String, dynamic> file = item['file'] as Map<String, dynamic>;
+      final Map<String, dynamic> values = item['values'] as Map<String, dynamic>;
+      final int? fileIndex = item['fileIndex'] as int?;
+      try {
+        final String filePath = (file['base64'] as String).trim();
+        final f = File(filePath);
+        if (!f.existsSync()) {
+          print('⚠️ File not found: ' + filePath);
+          continue;
+        }
+
+        String fileExtension = 'bin';
+        final String? originalName = file['name'] as String?;
+        if (originalName != null && originalName.contains('.')) {
+          fileExtension = originalName.split('.').last;
+        }
+
+        final String uniqueFileName = '${uuid.v4()}.$fileExtension';
+        final String objectPath = folder_name + '/' + uniqueFileName;
+
+        print('📤 Uploading: ${file['name']} as ' + uniqueFileName);
+
+        await _minio.fPutObject(
+          bucketName,
+          objectPath,
+          filePath,
+        );
+
+        final String uuidPath = uniqueFileName;
+
+        // تحديث قيمة الملف في الخريطة الأصلية (formControlsValues)
+        final dynamic filesList = values['files'];
+        if (fileIndex != null &&
+            filesList is List &&
+            fileIndex >= 0 &&
+            fileIndex < filesList.length) {
+          final dynamic entry = filesList[fileIndex];
+          if (entry is Map<String, dynamic>) {
+            entry['base64'] = uuidPath; // تحديث المسار إلى UUID الجديد
+          }
+        } else {
+          file['base64'] = uuidPath; // تحديث المسار في حالته الفردية
+        }
+
+        file['path'] = objectPath;
+        values['foldername'] = folder_name; // حفظ اسم المجلد في بيانات التحكم
+
+        uploadedCount += 1;
+        print('  ✅ Uploaded successfully: ' + uuidPath);
+      } catch (e) {
+        print('  ❌ Failed to upload ${file['name']}: ' + e.toString());
+        errorCount += 1;
+      }
+    }
+
+    if (uploadedCount > 0) {
+      res = 'success';
+    } else if (errorCount > 0) {
+      res = 'no files uploaded';
+    }
+
+    // إنشاء ملف JSON
+    try {
+      print('📝 إنشاء ملف JSON بالبيانات...');
+      final cleanData = <String, dynamic>{};
+      formControlsValues.forEach((key, value) {
+        // التأكد من أن قيمة value هي Map قبل محاولة تنظيفها
+        if (value is Map<String, dynamic>) {
+          cleanData[key.toString()] = _cleanMapForJson(value); 
+        } else {
+          cleanData[key.toString()] = value;
+        }
+      });
+
+      final jsonData = jsonEncode(cleanData);
+      final tempDir = await getTemporaryDirectory(); // يُفترض أن getTemporaryDirectory مُعرّف
+      final jsonFile = File('${tempDir.path}/$folder_name.json');
+      await jsonFile.writeAsString(jsonData, encoding: utf8);
+
+      final jsonObjectPath = '$folder_name/$folder_name.json';
+      await _minio.fPutObject(bucketName, jsonObjectPath, jsonFile.path);
+      print('✅ تم رفع ملف JSON بنجاح: $jsonObjectPath');
+      await jsonFile.delete();
+    } catch (jsonError) {
+      print('⚠️ تحذير: فشل إنشاء ملف JSON: $jsonError');
+    }
+
+    print('✅ All files processed successfully! Uploaded count: $uploadedCount');
+  } catch (e) {
+    print('❌ Error in uploadFormFilesToMinIOValues: ' + e.toString());
+    res = e.toString();
+  }
+
+  return (res, folder_name);
+}
  
 //   Future<(String, String)> uploadFormFilesToMinIOValues(
 //   Map<int, dynamic> formControlsValues,

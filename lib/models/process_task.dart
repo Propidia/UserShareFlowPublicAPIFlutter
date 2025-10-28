@@ -1,6 +1,6 @@
 import 'package:get/get.dart';
 
-enum ProcState { pending, success, error }
+enum ProcState { pending, success, error}
 
 class ProcessingTask {
   final String name;
