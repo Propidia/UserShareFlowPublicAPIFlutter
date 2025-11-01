@@ -1,4 +1,5 @@
 // controllers/folder_processing_controller.dart
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import 'package:useshareflowpublicapiflutter/models/folder_process.dart';
 import 'package:useshareflowpublicapiflutter/models/process_task.dart';
 import 'package:useshareflowpublicapiflutter/core/record_store.dart';
 import 'package:useshareflowpublicapiflutter/core/submission_service.dart';
+import 'package:useshareflowpublicapiflutter/services/folder_parser_service.dart';
 import 'package:useshareflowpublicapiflutter/ui/widgets/dialog_first_match.dart';
 import '../models/folder_parsing_models.dart';
 import '../services/api_client.dart';
@@ -20,21 +22,19 @@ import '../services/api_client.dart';
 
 class FolderProcessingController extends GetxController {
   final _apiClient = ApiClient.instance;
-
+  final _parserService = FolderParserService();
   // State
   final isProcessing = false.obs;
   final processedCount = 0.obs;
   final totalCount = 0.obs;
   final successCount = 0.obs;
   final failureCount = 0.obs;
-
   // قائمة المهام (يمكن استخدامها للعرض اللحظي إن رغبت)
   final RxList<ProcessingTask> tasks = <ProcessingTask>[].obs;
-
   // مؤشر لإدارة حالة الديالوج
   bool _dialogOpen = false;
   dynamic _formController;
-
+  int startIndex = 0; // مؤشر بداية المعالجة
   String? _failuresFilePath;
   String? _successFilePath;
   String? _foldersFilePath;
@@ -123,7 +123,12 @@ class FolderProcessingController extends GetxController {
       await scanAndMergeFoldersToFile(Directory(selectedDirectory));
       await processFoldersFromFileSequential();
     } catch (e) {
+       Funcs.errors.add('خطأ في اختيار المجلد: $e');
       _showSnackBar('خطأ في اختيار المجلد: $e', false);
+       final stop = await Funcs.checkRepeatingErrors();
+      if (stop) {
+        updateUIAfterStopeing();
+      }
     }
   }
 
@@ -248,6 +253,7 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
       }
       return FoldersData(folders: []);
     } catch (e) {
+       Funcs.errors.add('خطأ في قراءة الملف: $e');
       // حاول NDJSON قراءة سطر-سطر
       final lines = content.split(RegExp(r'\r?\n')).map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
       final parsed = <FolderData>[];
@@ -255,7 +261,18 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
         try {
           final obj = jsonDecode(line);
           if (obj is Map<String, dynamic>) parsed.add(FolderData.fromJson(obj));
-        } catch (_) {}
+        } catch (e) {
+           Funcs.errors.add('خطأ في قراءة الملف: $e');
+           final stop = await Funcs.checkRepeatingErrors();
+      if (stop) {
+        updateUIAfterStopeing();
+      }
+
+        }
+      }
+       final stop = await Funcs.checkRepeatingErrors();
+      if (stop) {
+        updateUIAfterStopeing();
       }
       return FoldersData(folders: parsed);
     }
@@ -485,7 +502,6 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
     }
   }
 */
-  
 
 void addToQueue(FolderData f) {
   if (!usedPaths.contains(f.path)) {
@@ -494,13 +510,15 @@ void addToQueue(FolderData f) {
   }
 }
   Future<void> processFoldersFromFileSequential() async {
+  // Reset stop flag at the start of new process
+  Funcs.resetStopRequest();
   isProcessing.value = true;
   processedCount.value = 0;
   successCount.value = 0;
   failureCount.value = 0;
 
   const int batchSize = 100; // حجم الدفعة
-  int startIndex = 0; // مؤشر بداية المعالجة
+
 
   try {
     var data = await _readFoldersData();
@@ -530,10 +548,23 @@ void addToQueue(FolderData f) {
     _showSnackBar('بدء المعالجة من ملف: ${queue.length} مجلد...', true);
 
     while (startIndex < queue.length) {
+      // Check if stop was requested before processing batch
+      if (Funcs.isStopRequested) {
+        updateUIAfterStopeing();
+        return;
+      }
+
       final end = (startIndex + batchSize < queue.length) ? startIndex + batchSize : queue.length;
       final batch = queue.sublist(startIndex, end);
 
       for (final f in batch) {
+        // Check if stop was requested before processing each folder
+        // This prevents starting a new folder if stop was requested during previous folder
+        if (Funcs.isStopRequested) {
+          updateUIAfterStopeing();
+          return; // Exit immediately, don't process this or any remaining folders
+        }
+
         final dir = Directory(f.path);
         if (!await dir.exists()) {
           // علم على المجلد كمحذوف بدل مسحه
@@ -555,6 +586,12 @@ void addToQueue(FolderData f) {
             attempts: f.attempts + 1);
 
         final result = await _processSingleSubfolderWrapped(dir);
+
+        // Check if stop was requested - either by flag or by result message
+        if (Funcs.isStopRequested || result.errorMessage == 'تم إيقاف المعالجة حسب الطلب') {
+          updateUIAfterStopeing();
+          return;
+        }
 
         if (result.status == ProcessingStatus.Success) {
           await _updateFolderStatus(f.path, ProcessingStatus.Success, 'تم الإرسال', processedAt: DateTime.now());
@@ -579,57 +616,138 @@ void addToQueue(FolderData f) {
         await Future.delayed(const Duration(milliseconds: 300));
       }
 
+      // Check before moving to next batch
+      if (Funcs.isStopRequested) {
+        updateUIAfterStopeing();
+        return;
+      }
+
       startIndex += batchSize;
       await Future.delayed(const Duration(seconds: 1)); // فاصل لتخفيف الضغط
     }
 
     // --- بعد المعالجة: إعادة فحص المعلقات والفاشلين مثل السابق تمامًا
-    await _retryPendingFolders(); // هذه الدالة تبقى كما كانت بدون تعديل
+    // Only retry if stop was not requested
+    if (!Funcs.isStopRequested) {
+      await _retryPendingFolders();
+    }
 
-    _showSnackBar('اكتملت المعالجة: ${successCount.value} نجح، ${failureCount.value} فشل', successCount.value > 0);
+    // Only show completion message if not stopped
+    if (!Funcs.isStopRequested) {
+      _showSnackBar('اكتملت المعالجة: ${successCount.value} نجح، ${failureCount.value} فشل', successCount.value > 0);
+    }
 
   } catch (e, st) {
+    Funcs.errors.add('خطأ في المعالجة: $e');
     _showSnackBar('خطأ في المعالجة: $e', false);
     print(st);
+    final stop = await Funcs.checkRepeatingErrors();
+    if (stop) {
+      updateUIAfterStopeing();
+      return; // Exit early when stop is requested
+    }
   } finally {
-    isProcessing.value = false;
+    // Only clear errors and reset processing state if not stopped
+    if (!Funcs.isStopRequested) {
+      Funcs.errors.clear();
+      isProcessing.value = false;
+    }
   }
 }
 
   
   // --- Wrapped single folder processing
-  Future<ProcessingResult> _processSingleSubfolderWrapped(Directory subfolder) async {
+  Future<ProcessingResult> _processSingleSubfolderWrapped(
+    Directory subfolder,
+  ) async {
     final folderName = subfolder.path.split(Platform.pathSeparator).last;
-     //This Comment is so Important do not remove it 
+    //This Comment is so Important do not remove it
     // Step 1: Parse folder name
-    // final parsed = _parserService.parseFolderName(folderName); 
-    // if (parsed == null) { 
-    // Parsing failed - invalid pattern 
-    //await _saveFailure(FailureRecord( originalName: folderName, parsedName: null, errorMessage: 'اسم المجلد لا يتطابق مع النمط المطلوب', timestamp: DateTime.now(), folderPath: subfolder.path, ));
-    // _showSnackBar('⚠️ نمط غير صحيح: $folderName', false); 
-    //failureCount.value++;
-      // Wait 1 second before moving to next folder await Future.delayed(const Duration(seconds: 1));
-      // return; 
-      //}
+    final parsed = _parserService.parseFolderName(folderName);
+    if (parsed == null) {
+    // Parsing failed - invalid pattern
+    await _saveFailure(Record( originalName: folderName, parsedName: null, errorMessage: 'اسم المجلد لا يتطابق مع النمط المطلوب', timestamp: DateTime.now(), folderPath: subfolder.path, ));
+    
+    // Add error first
+    Funcs.errors.add('اسم المجلد لا يتطابق مع النمط المطلوب: $folderName');
+    
+    // Check for repeating errors BEFORE showing snackbar
+    final stop = await Funcs.checkRepeatingErrors();
+    if (stop) {
+      // Stop was requested - don't show snackbar, don't process further
+      // Just return with stop status so main loop can break immediately
+      return ProcessingResult(
+        ProcessingStatus.Error,
+        errorMessage: 'تم إيقاف المعالجة حسب الطلب',
+      );
+    }
+    
+    // Only show snackbar if stop was NOT requested
+    if (!Funcs.isStopRequested) {
+      _showSnackBar('⚠️ نمط غير صحيح: $folderName', false);
+    }
+    failureCount.value++;
+    // Wait 1 second before moving to next folder 
+    await Future.delayed(const Duration(seconds: 1));
+    return ProcessingResult(
+          ProcessingStatus.Error,
+          errorMessage: 'اسم المجلد لا يتطابق مع النمط المطلوب',
+        );
+    
+    }
 
     try {
-      final connectedControl = Funcs.form_model?.controls.firstWhereOrNull((c) => c.type == 16);
+      final connectedControl = Funcs.form_model?.controls.firstWhereOrNull(
+        (c) => c.type == 16,
+      );
       if (connectedControl == null) {
-        return ProcessingResult(ProcessingStatus.Error, errorMessage: 'لا توجد أداة ربط (نوع 16) في النموذج');
+        return ProcessingResult(
+          ProcessingStatus.Error,
+          errorMessage: 'لا توجد أداة ربط (نوع 16) في النموذج',
+        );
       }
 
+      // Check if stop was requested before starting API calls
+      if (Funcs.isStopRequested) {
+        return ProcessingResult(
+          ProcessingStatus.Error,
+          errorMessage: 'تم إيقاف المعالجة حسب الطلب',
+        );
+      }
+          
       final response = await _apiClient.getFirstMatch(
         formId: Funcs.form_id!,
         controlId: connectedControl.id,
-        value: folderName,
+        value: parsed!.formatted,
       );
 
+      // Check again after API call
+      if (Funcs.isStopRequested) {
+        return ProcessingResult(
+          ProcessingStatus.Error,
+          errorMessage: 'تم إيقاف المعالجة حسب الطلب',
+        );
+      }
+
+      print('response: $response');
       final valueMap = _asValueMap(response['value']);
       if (valueMap == null || valueMap.isEmpty) {
-        return ProcessingResult(ProcessingStatus.Empty, errorMessage: 'لا توجد بيانات مطابقة للمجلد');
+        return ProcessingResult(
+          ProcessingStatus.Empty,
+          errorMessage: 'لا توجد بيانات مطابقة للمجلد',
+        );
       }
 
       await _openPreviewDialog(valueMap);
+
+      // Check before form operations
+      if (Funcs.isStopRequested) {
+        await _closePreviewDialogIfAny();
+        return ProcessingResult(
+          ProcessingStatus.Error,
+          errorMessage: 'تم إيقاف المعالجة حسب الطلب',
+        );
+      }
 
       try {
         _formController?.setConnectedValue(connectedControl.id, valueMap);
@@ -637,112 +755,229 @@ void addToQueue(FolderData f) {
         await _addFilesToFileControl(subfolder);
         _formController?.forceUpdate();
 
+        // Check before building payload
+        if (Funcs.isStopRequested) {
+          await _closePreviewDialogIfAny();
+          return ProcessingResult(
+            ProcessingStatus.Error,
+            errorMessage: 'تم إيقاف المعالجة حسب الطلب',
+          );
+        }
+
         final payload = await _formController?.buildSubmitPayload();
         if (payload == null) print('فشل بناء payload');
 
+        // Check before submitting
+        if (Funcs.isStopRequested) {
+          await _closePreviewDialogIfAny();
+          return ProcessingResult(
+            ProcessingStatus.Error,
+            errorMessage: 'تم إيقاف المعالجة حسب الطلب',
+          );
+        }
+
         final uploadFolderName = payload['foldername'] ?? 'unknown';
         final submitResponse = await _apiClient.submitForm(payload);
+
+        // Check after submitting
+        if (Funcs.isStopRequested) {
+          await _closePreviewDialogIfAny();
+          return ProcessingResult(
+            ProcessingStatus.Error,
+            errorMessage: 'تم إيقاف المعالجة حسب الطلب',
+          );
+        }
         final uploadedCount = _countUploadedFiles(payload['controls']);
 
         final initial = SubmissionService.checkSubmissionStatus(submitResponse);
 
         if (initial.status == SubmissionStatus.success) {
           final applyId = initial.applyId!;
-          await _saveSuccess(Record(
-            originalName: folderName,
-            parsedName: folderName,
-            errorMessage: 'تم الرفع والإرسال بنجاح (folder: $uploadFolderName, files: $uploadedCount)',
-            timestamp: DateTime.now(),
-            folderPath: subfolder.path,
-          ));
+          await _saveSuccess(
+            Record(
+              originalName: folderName,
+              parsedName: parsed!.formatted,
+              errorMessage:
+                  'تم الرفع والإرسال بنجاح (folder: $uploadFolderName, files: $uploadedCount)',
+              timestamp: DateTime.now(),
+              folderPath: subfolder.path,
+            ),
+          );
           return ProcessingResult(ProcessingStatus.Success, applyId: applyId);
         }
 
-            if (initial.status == SubmissionStatus.pending) {
-                // حساب حجم المجلد لتحديد مهلة السماح المناسبة
-                final folderBytes = await _directorySize(subfolder);
-                final cfg = pollConfigForSizeBytes(folderBytes);
+        if (initial.status == SubmissionStatus.pending) {
+          // حساب حجم المجلد لتحديد مهلة السماح المناسبة
+          final folderBytes = await _directorySize(subfolder);
+          final cfg = pollConfigForSizeBytes(folderBytes);
 
-                // عرض رسالة دائمة توضح أن التطبيق ينتظر وخمن المدة
-                final humanSize = (folderBytes / (1024 * 1024)).toStringAsFixed(1);
-                _showPersistentInfo('جاري التحقق من حالة الإرسال — حجم المجلد ~ ${humanSize} MB. الانتظار حتى ${cfg.grace.inSeconds} ثانية...');
+          // عرض رسالة دائمة توضح أن التطبيق ينتظر وخمن المدة
+          final humanSize = (folderBytes / (1024 * 1024)).toStringAsFixed(1);
+          _showPersistentInfo(
+            'جاري التحقق من حالة الإرسال — حجم المجلد ~ ${humanSize} MB. الانتظار حتى ${cfg.grace.inSeconds} ثانية...',
+          );
 
-                try {
-                  final check = await SubmissionService.pollForGracePeriod(
-                    taskId: initial.taskId ?? '',
-                    accessToken: initial.accessToken,
-                    grace: cfg.grace,
-                    pollInterval: cfg.pollInterval,
-                    perAttemptTimeout: cfg.perAttemptTimeout,
-                  );
+          try {
+            // Check before polling
+            if (Funcs.isStopRequested) {
+              _hidePersistentSnack();
+              await _closePreviewDialogIfAny();
+              return ProcessingResult(
+                ProcessingStatus.Error,
+                errorMessage: 'تم إيقاف المعالجة حسب الطلب',
+              );
+            }
 
-                  if (check.status == SubmissionStatus.success && check.applyId != null) {
-                    final applyId = check.applyId!;
-                    await _saveSuccess(Record(
-                      originalName: folderName,
-                      parsedName: folderName,
-                      errorMessage: 'تم الرفع والإرسال بنجاح (applyId: $applyId)',
-                      timestamp: DateTime.now(),
-                      folderPath: subfolder.path,
-                    ));
-                    // حدّث ملف الفولدرات
-                    await _updateFolderStatus(subfolder.path, ProcessingStatus.Success, 'تم الإرسال', processedAt: DateTime.now());
-                    return ProcessingResult(ProcessingStatus.Success, applyId: applyId);
-                  }
+            final check = await SubmissionService.pollForGracePeriod(
+              taskId: initial.taskId ?? '',
+              accessToken: initial.accessToken,
+              grace: cfg.grace,
+              pollInterval: cfg.pollInterval,
+              perAttemptTimeout: cfg.perAttemptTimeout,
+              shouldStop: () => Funcs.isStopRequested,
+            );
 
-                  // بقي Pending بعد نافذة السماح أو لم نتمكن من استخلاص applyId
-                  // سجّل taskId/accessToken (إن وُجدتا) ليعاد فحصها في المرور الثاني
-                  await _updateFolderStatus(
-                    subfolder.path,
-                    ProcessingStatus.Processing,
-                    'قيد الانتظار (تم إرسال الطلب، بانتظار نتيجة بعد نافذة السماح)',
-                    attempts: null, // سيزيد attempts في النداء الأعلى
-                    taskId: initial.taskId,
-                    accessToken: initial.accessToken,
-                  );
+            // Check after polling
+            if (Funcs.isStopRequested) {
+              _hidePersistentSnack();
+              await _closePreviewDialogIfAny();
+              return ProcessingResult(
+                ProcessingStatus.Error,
+                errorMessage: 'تم إيقاف المعالجة حسب الطلب',
+              );
+            }
 
-                  return ProcessingResult(ProcessingStatus.Processing, taskId: initial.taskId, accessToken: initial.accessToken);
-                } catch (e) {
-                  // خطأ خلال الاستعلام — سجّله كفشل موقّت
-                  await _saveFailure(Record(
-                    originalName: folderName,
-                    parsedName: folderName,
-                    errorMessage: 'خطأ أثناء نافذة السماح: $e',
-                    timestamp: DateTime.now(),
-                    folderPath: subfolder.path,
-                  ));
-                  await _updateFolderStatus(subfolder.path, ProcessingStatus.Error, 'خطأ أثناء نافذة السماح: $e', processedAt: DateTime.now());
-                  return ProcessingResult(ProcessingStatus.Error, errorMessage: e.toString());
-                } finally {
-                  _hidePersistentSnack();
-                }
+            if (check.status == SubmissionStatus.success &&
+                check.applyId != null) {
+              final applyId = check.applyId!;
+              await _saveSuccess(
+                Record(
+                  originalName: folderName,
+                  parsedName: parsed!.formatted,
+                  errorMessage: 'تم الرفع والإرسال بنجاح (applyId: $applyId)',
+                  timestamp: DateTime.now(),
+                  folderPath: subfolder.path,
+                ),
+              );
+              // حدّث ملف الفولدرات
+              await _updateFolderStatus(
+                subfolder.path,
+                ProcessingStatus.Success,
+                'تم الإرسال',
+                processedAt: DateTime.now(),
+              );
+              return ProcessingResult(
+                ProcessingStatus.Success,
+                applyId: applyId,
+              );
+            }
+
+            // بقي Pending بعد نافذة السماح أو لم نتمكن من استخلاص applyId
+            // سجّل taskId/accessToken (إن وُجدتا) ليعاد فحصها في المرور الثاني
+            await _updateFolderStatus(
+              subfolder.path,
+              ProcessingStatus.Processing,
+              'قيد الانتظار (تم إرسال الطلب، بانتظار نتيجة بعد نافذة السماح)',
+              attempts: null, // سيزيد attempts في النداء الأعلى
+              taskId: initial.taskId,
+              accessToken: initial.accessToken,
+            );
+
+            return ProcessingResult(
+              ProcessingStatus.Processing,
+              taskId: initial.taskId,
+              accessToken: initial.accessToken,
+            );
+          } catch (e) {
+            // خطأ خلال الاستعلام — سجّله كفشل موقّت
+            Funcs.errors.add('خطأ أثناء نافذة السماح: $e');
+            await _saveFailure(
+              Record(
+                originalName: folderName,
+                parsedName: parsed!.formatted,
+                errorMessage: 'خطأ أثناء نافذة السماح: $e',
+                timestamp: DateTime.now(),
+                folderPath: subfolder.path,
+              ),
+            );
+            await _updateFolderStatus(
+              subfolder.path,
+              ProcessingStatus.Error,
+              'خطأ أثناء نافذة السماح: $e',
+              processedAt: DateTime.now(),
+            );
+            final stop = await Funcs.checkRepeatingErrors();
+            if (stop) {
+              // Don't call updateUIAfterStopeing() here - let the main loop handle it
+              return ProcessingResult(
+                ProcessingStatus.Error,
+                errorMessage: 'تم إيقاف المعالجة حسب الطلب',
+              );
+            }
+
+            return ProcessingResult(
+              ProcessingStatus.Error,
+              errorMessage: e.toString(),
+            );
+          } finally {
+            _hidePersistentSnack();
           }
+        }
 
-
-
-        return ProcessingResult(ProcessingStatus.Error, errorMessage: initial.errorMessage ?? 'فشل الإرسال');
+        return ProcessingResult(
+          ProcessingStatus.Error,
+          errorMessage: initial.errorMessage ?? 'فشل الإرسال',
+        );
       } catch (apiError) {
-        await _saveFailure(Record(
-          originalName: folderName,
-          parsedName: folderName,
+        Funcs.errors.add('خطأ في الإرسال: $apiError');
+        await _saveFailure(
+          Record(
+            originalName: folderName,
+            parsedName: parsed!.formatted,
+            errorMessage: apiError.toString(),
+            timestamp: DateTime.now(),
+            folderPath: subfolder.path,
+          ),
+        );
+        final stop = await Funcs.checkRepeatingErrors();
+        if (stop) {
+          // Don't call updateUIAfterStopeing() here - let the main loop handle it
+          return ProcessingResult(
+            ProcessingStatus.Error,
+            errorMessage: 'تم إيقاف المعالجة حسب الطلب',
+          );
+        }
+        return ProcessingResult(
+          ProcessingStatus.Error,
           errorMessage: apiError.toString(),
-          timestamp: DateTime.now(),
-          folderPath: subfolder.path,
-        ));
-        return ProcessingResult(ProcessingStatus.Error, errorMessage: apiError.toString());
+        );
       } finally {
         _hidePersistentSnack();
         await _closePreviewDialogIfAny();
       }
     } catch (searchError) {
-      await _saveFailure(Record(
-        originalName: folderName,
-        parsedName: folderName,
+      Funcs.errors.add('خطأ في البحث: $searchError');
+      await _saveFailure(
+        Record(
+          originalName: folderName,
+          parsedName: parsed!.formatted,
+          errorMessage: searchError.toString(),
+          timestamp: DateTime.now(),
+          folderPath: subfolder.path,
+        ),
+      );
+      final stop = await Funcs.checkRepeatingErrors();
+      if (stop) {
+        // Don't call updateUIAfterStopeing() here - let the main loop handle it
+        return ProcessingResult(
+          ProcessingStatus.Error,
+          errorMessage: 'تم إيقاف المعالجة حسب الطلب',
+        );
+      }
+      return ProcessingResult(
+        ProcessingStatus.Error,
         errorMessage: searchError.toString(),
-        timestamp: DateTime.now(),
-        folderPath: subfolder.path,
-      ));
-      return ProcessingResult(ProcessingStatus.Error, errorMessage: searchError.toString());
+      );
     } finally {
       await Future.delayed(const Duration(seconds: 2));
       await _closePreviewDialogIfAny();
@@ -754,7 +989,12 @@ void addToQueue(FolderData f) {
     try {
       await _recordStore?.saveFailure(record);
     } catch (e) {
+       Funcs.errors.add('خطأ في حفظ الفشل: $e');
       print('Error saving failure: $e');
+       final stop = await Funcs.checkRepeatingErrors();
+      if (stop) {
+        updateUIAfterStopeing();
+      }
     }
   }
 
@@ -762,7 +1002,12 @@ void addToQueue(FolderData f) {
     try {
       await _recordStore?.saveSuccess(record);
     } catch (e) {
+       Funcs.errors.add('خطأ في حفظ النجاح: $e');
       print('Error saving success: $e');
+       final stop = await Funcs.checkRepeatingErrors();
+      if (stop) {
+        updateUIAfterStopeing();
+      }
     }
   }
 
@@ -819,7 +1064,12 @@ void addToQueue(FolderData f) {
         }
       }
     } catch (e) {
+       Funcs.errors.add('خطأ في تعبئة الفورم: $e');
       print('خطأ في تعبئة الفورم: $e');
+       final stop = await Funcs.checkRepeatingErrors();
+      if (stop) {
+        updateUIAfterStopeing();
+      }
     }
   }
 
@@ -842,7 +1092,12 @@ void addToQueue(FolderData f) {
       }
       _formController.setValueWithoutValidation(fileControl.id, {'files': filesList});
     } catch (e) {
+       Funcs.errors.add('خطأ في إضافة الملفات: $e');
       print('خطأ في إضافة الملفات: $e');
+       final stop = await Funcs.checkRepeatingErrors();
+      if (stop) {
+        updateUIAfterStopeing();
+      }
     }
   }
 
@@ -860,8 +1115,13 @@ void addToQueue(FolderData f) {
     _dialogOpen = true;
     try {
       showFirstMatchDialog(valueMap);
-    } catch (_) {
+    } catch (e) {
+       Funcs.errors.add('خطأ في فتح النافذة: $e');
       _dialogOpen = false;
+       final stop = await Funcs.checkRepeatingErrors();
+      if (stop) {
+        updateUIAfterStopeing();
+      }
       rethrow;
     }
   }
@@ -879,7 +1139,12 @@ void addToQueue(FolderData f) {
       await _recordStore!.clearFailures();
       _showSnackBar('تم مسح سجل الفشل', true);
     } catch (e) {
+       Funcs.errors.add('خطأ في مسح سجل الفشل: $e');
       _showSnackBar('خطأ في مسح سجل الفشل: $e', false);
+       final stop = await Funcs.checkRepeatingErrors();
+      if (stop) {
+        updateUIAfterStopeing();
+      }
     }
   }
 
@@ -892,7 +1157,8 @@ Future<int> _directorySize(Directory dir) async {
         try {
           final len = await entity.length();
           total += len;
-        } catch (_) {
+        } catch (e) {
+           Funcs.errors.add('خطأ في حساب حجم المجلد: $e');
           // تجاهل الملفات التي تعطي خطأ في الطول
         }
       }
@@ -904,6 +1170,11 @@ Future<int> _directorySize(Directory dir) async {
 }
 //Retry Pending Folders
 Future<void> _retryPendingFolders() async {
+  // Check if stop was requested before starting retry
+  if (Funcs.isStopRequested) {
+    return;
+  }
+
   final data = await _readFoldersData();
   final pendingFolders = data.folders.where((fd) =>
       fd.Status == ProcessingStatus.Processing.toString().split('.').last &&
@@ -921,10 +1192,20 @@ Future<void> _retryPendingFolders() async {
   final maxAttempts = retryDelays.length;
 
   for (final pf in pendingFolders) {
+    // Check if stop was requested before processing each pending folder
+    if (Funcs.isStopRequested) {
+      return;
+    }
+
     bool resolved = false;
     String lastErrorMessage = '';
 
     for (int attempt = 0; attempt < maxAttempts; attempt++) {
+      // Check if stop was requested before each retry attempt
+      if (Funcs.isStopRequested) {
+        return;
+      }
+
       if (attempt > 0) await Future.delayed(retryDelays[attempt]);
 
       try {
@@ -933,7 +1214,13 @@ Future<void> _retryPendingFolders() async {
           grace: const Duration(seconds: 5),
           pollInterval: const Duration(seconds: 1),
           perAttemptTimeout: Duration(seconds: 5 + (attempt * 5)),
+          shouldStop: () => Funcs.isStopRequested,
         );
+
+        // Check again after polling
+        if (Funcs.isStopRequested) {
+          return;
+        }
 
         if (check.status == SubmissionStatus.success && check.applyId != null) {
           final applyId = check.applyId!;
@@ -961,12 +1248,25 @@ Future<void> _retryPendingFolders() async {
           continue;
         }
       } catch (e) {
+        Funcs.errors.add('خطأ في إعادة فحص المهمة المعلقة: $e');
         lastErrorMessage = e.toString();
+        final stop = await Funcs.checkRepeatingErrors();
+        if (stop) {
+          updateUIAfterStopeing();
+          return; // Exit early when stop is requested
+        }
+
         continue;
       }
     }
 
+    // Check before finalizing this folder
+    if (Funcs.isStopRequested) {
+      return;
+    }
+
     if (!resolved) {
+       Funcs.errors.add('لم تصل نتيجة بعد ${maxAttempts} محاولات؛ يتم ختم المعالجة بتاريخ الآن');
       final msg = 'لم تصل نتيجة بعد ${maxAttempts} محاولات؛ يتم ختم المعالجة بتاريخ الآن';
       await _updateFolderStatus(pf.path, ProcessingStatus.Error, msg, processedAt: DateTime.now());
       failureCount.value++;
@@ -977,10 +1277,26 @@ Future<void> _retryPendingFolders() async {
         timestamp: DateTime.now(),
         folderPath: pf.path,
       ));
+       final stop = await Funcs.checkRepeatingErrors();
+      if (stop) {
+        updateUIAfterStopeing();
+        return; // Exit early when stop is requested
+      }
+
     }
 
     await Future.delayed(const Duration(seconds: 2));
   }
 }
+
+void updateUIAfterStopeing(){
+  // Don't reset stop flag here - it should remain set until a new process starts
+  // This ensures any remaining checks will see the stop flag
+  _hidePersistentSnack();
+  _closePreviewDialogIfAny();
+  isProcessing.value = false;
+  _showSnackBar('تم إيقاف المعالجة حسب الطلب', false);
+  //  Get.reloadAll(force: true);
+  }
 
 }

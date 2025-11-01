@@ -93,15 +93,27 @@ class SubmissionService {
     Duration grace = const Duration(seconds: 5),
     Duration pollInterval = const Duration(seconds: 1),
     Duration perAttemptTimeout = const Duration(seconds: 1),
+    bool Function()? shouldStop,
   }) async {
     final deadline = DateTime.now().add(grace);
 
     while (DateTime.now().isBefore(deadline)) {
+      // Check if stop was requested before each poll iteration
+      if (shouldStop != null && shouldStop()) {
+        // Return pending if stop was requested during polling
+        return SubmissionCheckResult.pending(taskId, accessToken);
+      }
+
       try {
         // اجلب النتيجة من ApiClient - قد تُعيد String أو Map أو JSON-string
         final raw = await ApiClient.instance
             .checkTaskStatus(taskId, accessToken: accessToken)
             .timeout(perAttemptTimeout);
+
+        // Check again after API call
+        if (shouldStop != null && shouldStop()) {
+          return SubmissionCheckResult.pending(taskId, accessToken);
+        }
 
         // نحاول أن نتعامل مع كل الحالات الممكنة:
         // 1) String نصي
@@ -187,6 +199,11 @@ class SubmissionService {
       } catch (e) {
         // تجاهل الأخطاء المؤقتة (timeout، network...) واستمر حتى انتهاء ال grace
         print('Error polling for grace period: $e');
+      }
+
+      // Check before delaying
+      if (shouldStop != null && shouldStop()) {
+        return SubmissionCheckResult.pending(taskId, accessToken);
       }
 
       await Future.delayed(pollInterval);

@@ -34,7 +34,14 @@ class _DynamicFormScreenState extends State<DynamicFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: !folderController.isProcessing.value,
+    onPopInvokedWithResult: (didPop, result) async {
+      if (didPop) {
+        folderController.updateUIAfterStopeing();
+      }
+    },
+    child: Scaffold(
       appBar: AppBar(
         title: const Text('نموذج تعبئة البيانات', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.blue.shade700,
@@ -121,6 +128,7 @@ class _DynamicFormScreenState extends State<DynamicFormScreen> {
           ),
         );
       }),
+    ),
     );
   }
 

@@ -178,9 +178,12 @@ class ApiClient {
     }
     if (res.statusCode == 401) throw Exception('API KEY غير صالح');
     if (res.statusCode == 404) throw Exception('لم يتم العثور على تطابق');
-
+    Funcs.errors.add('فشل البحث عن تطابق (${res.statusCode}): ${res.body}');
+    await Funcs.checkRepeatingErrors();
     throw Exception('فشل البحث عن تطابق (${res.statusCode}): ${res.body}');
   } catch (e) {
+    // Funcs.errors.add('خطأ في البحث عن تطابق: $e');
+    // await Funcs.checkRepeatingErrors();
     throw Exception('خطأ في البحث عن تطابق: $e');
   }
 }

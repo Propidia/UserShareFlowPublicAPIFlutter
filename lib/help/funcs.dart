@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:useshareflowpublicapiflutter/models/form_models.dart';
 
 /// ملف الدوال المساعدة والمتغيرات العامة
@@ -10,7 +12,10 @@ class Funcs {
   static int? form_id;
   static FormStructureModel? form_model;
   static int? user_id;
-  
+  static final List<String> errors = <String>[];
+  static bool _stopRequested = false;
+  static Completer<void>? stopCompleter =Completer<void>();
+
   // ========================================
   // دوال المساعدة العامة
   // ========================================
@@ -104,7 +109,8 @@ class Funcs {
     String formattedMessage = prefix != null ? '[$timestamp] $prefix: $message' : '[$timestamp] $message';
     print(formattedMessage);
   }
-  
+
+
   // /// التحقق من صحة بيانات MinIO
   // static bool validateMinIOConfig() {
   //   return minio_end_point.isNotEmpty &&
@@ -122,6 +128,48 @@ class Funcs {
   //   print('🔑 مفتاح الوصول: ${minio_access_key.substring(0, 3)}***');
   //   print('🔒 المفتاح السري: ${minio_secret_key.substring(0, 3)}***');
   // }
+
+// call this to request stop from anywhere (idempotent)
+static void _requestStop() {
+  if (_stopRequested) return;
+  _stopRequested = true;
+  stopCompleter ??= null;
+  if (!stopCompleter!.isCompleted) stopCompleter!.complete();
+}
+
+// call this to reset before a new run
+static void resetStopRequest() {
+  _stopRequested = false;
+  stopCompleter = Completer<void>();
+}
+
+// check if stop was requested
+static bool get isStopRequested => _stopRequested || (stopCompleter?.isCompleted ?? false);
+  static Future<bool> checkRepeatingErrors() async {
+  final errorsList = Funcs.errors.toList();
+  final firstError = errorsList.first;
+  int count = 0;
+  if (errorsList.isEmpty) return false;
+
+  for (final error in errorsList) {
+     if (error.contains(firstError)) {
+      count++;
+      
+      }else{
+         count = 0;
+      }
+    print('count: $count');
+    if(count == 10){
+
+      _requestStop();
+      errors.clear();
+      return true;
+    }
+    
+  }
+
+  return false;
+}
 }
 
 /// إنشاء مثيل عام من Funcs للاستخدام في جميع أنحاء التطبيق
