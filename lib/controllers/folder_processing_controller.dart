@@ -192,6 +192,7 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
         processedAt: existing.processedAt,
         attempts: existing.attempts,
         taskId: existing.taskId,
+        accessToken: existing.accessToken, // حفظ accessToken
         isDeleted: false, // عاد المجلد، أصبح غير محذوف
       );
       merged.add(updated);
@@ -222,6 +223,7 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
         processedAt: old.processedAt,
         attempts: old.attempts,
         taskId: old.taskId,
+        accessToken: old.accessToken, // حفظ accessToken
         isDeleted: true,
       );
       merged.add(updated);
@@ -316,6 +318,7 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
       processedAt: processedAt ?? old.processedAt,
       attempts: attempts ?? old.attempts,
       taskId: taskId ?? old.taskId,
+      accessToken: accessToken ?? old.accessToken, // حفظ accessToken
     );
     final newList = List<FolderData>.from(data.folders);
     newList[idx] = updated;
@@ -417,7 +420,7 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
           // كل محاولة تستخدم نافذة grace صغيرة نسبياً لكن مع perAttemptTimeout أكبر
           final grace = const Duration(seconds: 5); // نافذة داخلية لكل pollForGracePeriod
           final pollInterval = const Duration(seconds: 1);
-          final perAttemptTimeout =  Duration(seconds: 5 + (attempt * 5)); // ازدياد المهلة مع المحاولات
+          final perAttemptTimeout =  Duration(seconds: 35 + (attempt * 10)); // ازدياد المهلة مع المحاولات (35 ثانية كحد أدنى)
 
           try {
             // سجل بداية المحاولة
@@ -777,7 +780,9 @@ void addToQueue(FolderData f) {
         }
 
         final uploadFolderName = payload['foldername'] ?? 'unknown';
+        print('payload: ${jsonEncode(payload)}');
         final submitResponse = await _apiClient.submitForm(payload);
+        print('submitResponse: ${jsonEncode(submitResponse)}');
 
         // Check after submitting
         if (Funcs.isStopRequested) {
@@ -789,7 +794,7 @@ void addToQueue(FolderData f) {
         }
         final uploadedCount = _countUploadedFiles(payload['controls']);
 
-        final initial = SubmissionService.checkSubmissionStatus(submitResponse);
+        final initial = await SubmissionService.checkSubmissionStatus(submitResponse);
 
         if (initial.status == SubmissionStatus.success) {
           final applyId = initial.applyId!;
@@ -1211,9 +1216,10 @@ Future<void> _retryPendingFolders() async {
       try {
         final check = await SubmissionService.pollForGracePeriod(
           taskId: pf.taskId!,
+          accessToken: pf.accessToken, // استخدام accessToken المحفوظ
           grace: const Duration(seconds: 5),
           pollInterval: const Duration(seconds: 1),
-          perAttemptTimeout: Duration(seconds: 5 + (attempt * 5)),
+          perAttemptTimeout: Duration(seconds: 35 + (attempt * 10)), // ازدياد المهلة مع المحاولات (35 ثانية كحد أدنى)
           shouldStop: () => Funcs.isStopRequested,
         );
 

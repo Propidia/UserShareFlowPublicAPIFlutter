@@ -1,3 +1,6 @@
 {
-    "cmake.sourceDirectory": "E:/github/development/UseShareFlowPublicAPIFlutter/linux"
+    "cmake.sourceDirectory": "E:/github/development/UseShareFlowPublicAPIFlutter/linux",
+    "files.readonlyInclude": {
+        "{**/.c4z/.extsrcs/*.PROTSYM.cbl,**/.c4z/.extsrcs/*.PROTSYM.listing}": true
+    }
 }

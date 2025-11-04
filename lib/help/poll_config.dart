@@ -10,15 +10,15 @@ _PollConfig pollConfigForSizeBytes(int bytes) {
   const mb = 1024 * 1024;
   if (bytes < 10 * mb) {
     // صغير: 5s window
-    return _PollConfig(const Duration(seconds: 5), const Duration(seconds: 1), const Duration(seconds: 2));
+    return _PollConfig(const Duration(seconds: 10), const Duration(seconds: 3), const Duration(seconds: 35));
   } else if (bytes < 100 * mb) {
     // متوسط: 30s
-    return _PollConfig(const Duration(seconds: 30), const Duration(seconds: 2), const Duration(seconds: 4));
+    return _PollConfig(const Duration(seconds: 30), const Duration(seconds: 4), const Duration(seconds: 35));
   } else if (bytes < 500 * mb) {
     // كبير: 2 minutes
-    return _PollConfig(const Duration(minutes: 2), const Duration(seconds: 3), const Duration(seconds: 6));
+    return _PollConfig(const Duration(minutes: 5), const Duration(seconds: 5), const Duration(seconds: 40));
   } else {
     // جداً كبير: 5 minutes
-    return _PollConfig(const Duration(minutes: 5), const Duration(seconds: 4), const Duration(seconds: 10));
+    return _PollConfig(const Duration(minutes: 8), const Duration(seconds: 8), const Duration(seconds: 45));
   }
 }

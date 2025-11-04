@@ -7,6 +7,7 @@ class FolderData {
   final DateTime? processedAt;
   final int attempts; // عدد محاولات المعالجة
   final String? taskId;// اختياري
+  final String? accessToken; // token للمصادقة
   final bool isDeleted;
   FolderData({
     required this.name,
@@ -17,6 +18,7 @@ class FolderData {
     this.processedAt,
     this.attempts = 0,
     this.taskId,
+    this.accessToken,
     this.isDeleted = false,
   });
 
@@ -29,6 +31,7 @@ class FolderData {
         processedAt: json['processedAt'] != null ? DateTime.parse(json['processedAt'] as String) : null,
         attempts: (json['attempts'] ?? 0) as int,
         taskId: json['taskId'] as String?,
+        accessToken: json['accessToken'] as String?,
        isDeleted: (json['isDeleted'] ?? json['deleted'] ?? false) is bool
     ? (json['isDeleted'] ?? json['deleted'] ?? false) as bool
     : (json['isDeleted'] ?? json['deleted'] ?? 'false').toString().toLowerCase() == 'true',
@@ -43,6 +46,7 @@ class FolderData {
         'processedAt': processedAt?.toIso8601String(),
         'attempts': attempts,
         'taskId': taskId,
+        'accessToken': accessToken,
         'isDeleted': isDeleted,
       };
 }
@@ -72,6 +76,7 @@ extension FolderDataCopy on FolderData {
     DateTime? processedAt,
     int? attempts,
     String? taskId,
+    String? accessToken,
     bool? isDeleted,
   }) {
     return FolderData(
@@ -83,6 +88,7 @@ extension FolderDataCopy on FolderData {
       processedAt: processedAt ?? this.processedAt,
       attempts: attempts ?? this.attempts,
       taskId: taskId ?? this.taskId,
+      accessToken: accessToken ?? this.accessToken,
       isDeleted: isDeleted ?? this.isDeleted,
     );
   }
