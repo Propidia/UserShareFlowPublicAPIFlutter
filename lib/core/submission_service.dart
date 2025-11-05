@@ -88,7 +88,7 @@ class SubmissionService {
         return SubmissionCheckResult.error('لم يتم إرجاع task_id أو apply_id من السيرفر');
       }
       final accessToken = _extractAccessToken(response);
-      await LogServices.write('[SubmissionService] الإرسال قيد الانتظار - task_id: $taskId, accessToken: ${accessToken != null ? "موجود" : "غير موجود"}');
+      await LogServices.write('[SubmissionService] الإرسال قيد الانتظار - task_id: $taskId');
       return SubmissionCheckResult.pending(taskId, accessToken);
     } catch (e) {
       await LogServices.write('[SubmissionService] خطأ في checkSubmissionStatus: $e');
@@ -105,7 +105,7 @@ class SubmissionService {
     Duration perAttemptTimeout = const Duration(seconds: 35),
     bool Function()? shouldStop,
   }) async {
-    await LogServices.write('[pollForGracePeriod] بدء الاستعلام عن حالة المهمة - task_id: $taskId, grace: ${grace.inSeconds} ثانية, accessToken: ${accessToken != null && accessToken.isNotEmpty ? "موجود" : "غير موجود"}');
+    await LogServices.write('[pollForGracePeriod] بدء الاستعلام عن حالة المهمة - task_id: $taskId, grace: ${grace.inSeconds} ثانية');
     final deadline = DateTime.now().add(grace);
     int attemptCount = 0;
 

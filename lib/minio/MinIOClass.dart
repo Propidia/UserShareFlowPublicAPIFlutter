@@ -420,14 +420,16 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
           final dynamic entry = filesList[fileIndex];
           if (entry is Map<String, dynamic>) {
             entry['base64'] = uuidPath; // تحديث المسار إلى UUID الجديد
+            print('entry: $entry');
           }
         } else {
           file['base64'] = uuidPath; // تحديث المسار في حالته الفردية
+          print('file: $file');
         }
 
         file['path'] = objectPath;
         values['foldername'] = folder_name; // حفظ اسم المجلد في بيانات التحكم
-
+        print('file: $file');
         uploadedCount += 1;
         print('  ✅ Uploaded successfully: ' + uuidPath);
       } catch (e) {

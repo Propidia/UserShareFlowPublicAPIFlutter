@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:useshareflowpublicapiflutter/models/form_models.dart';
 
@@ -170,6 +171,61 @@ static bool get isStopRequested => _stopRequested || (stopCompleter?.isCompleted
 
   return false;
 }
+
+  /// Sanitizes JSON response by removing sensitive tokens
+  /// Removes access_token, accessToken, refresh_token, refreshToken, and authorization headers
+  static String sanitizeResponse(String response) {
+    try {
+      final dynamic data = jsonDecode(response);
+      final sanitized = _sanitizeMap(data);
+      return jsonEncode(sanitized);
+    } catch (e) {
+      // If not valid JSON, try to remove tokens from string
+      String sanitized = response;
+      // Remove access_token patterns
+      sanitized = sanitized.replaceAll(RegExp(r'"access_token"\s*:\s*"[^"]*"', caseSensitive: false), '"access_token":"***REDACTED***"');
+      sanitized = sanitized.replaceAll(RegExp(r'"accessToken"\s*:\s*"[^"]*"', caseSensitive: false), '"accessToken":"***REDACTED***"');
+      // Remove refresh_token patterns
+      sanitized = sanitized.replaceAll(RegExp(r'"refresh_token"\s*:\s*"[^"]*"', caseSensitive: false), '"refresh_token":"***REDACTED***"');
+      sanitized = sanitized.replaceAll(RegExp(r'"refreshToken"\s*:\s*"[^"]*"', caseSensitive: false), '"refreshToken":"***REDACTED***"');
+      return sanitized;
+    }
+  }
+
+  static dynamic _sanitizeMap(dynamic data) {
+    if (data is Map) {
+      final Map<String, dynamic> sanitized = {};
+      for (final entry in data.entries) {
+        final key = entry.key.toString().toLowerCase();
+        if (key == 'access_token' || 
+            key == 'accesstoken' || 
+            key == 'refresh_token' || 
+            key == 'refreshtoken' || 
+            key == 'authorization') {
+          sanitized[entry.key] = '***REDACTED***';
+        } else if (entry.value is Map) {
+          sanitized[entry.key] = _sanitizeMap(entry.value);
+        } else if (entry.value is List) {
+          sanitized[entry.key] = _sanitizeList(entry.value);
+        } else {
+          sanitized[entry.key] = entry.value;
+        }
+      }
+      return sanitized;
+    }
+    return data;
+  }
+
+  static List _sanitizeList(List data) {
+    return data.map((item) {
+      if (item is Map) {
+        return _sanitizeMap(item);
+      } else if (item is List) {
+        return _sanitizeList(item);
+      }
+      return item;
+    }).toList();
+  }
 }
 
 /// إنشاء مثيل عام من Funcs للاستخدام في جميع أنحاء التطبيق

@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:intl/intl.dart';
 import 'package:useshareflowpublicapiflutter/core/folder_data.dart';
 import 'package:useshareflowpublicapiflutter/help/funcs.dart';
+import 'package:useshareflowpublicapiflutter/help/log.dart';
 import 'package:useshareflowpublicapiflutter/help/poll_config.dart';
 import 'package:useshareflowpublicapiflutter/models/folder_process.dart';
 import 'package:useshareflowpublicapiflutter/models/process_task.dart';
@@ -118,8 +120,10 @@ class FolderProcessingController extends GetxController {
       final selectedDirectory = await FilePicker.platform.getDirectoryPath();
       if (selectedDirectory == null) {
         _showSnackBar('لم يتم اختيار أي مجلد', false);
+       await LogServices.write('[Folder Processing] لم يتم اختيار مجلد اب');
         return;
       }
+       await LogServices.write('[Folder Processing] تم اختيار مجلد اب');
       await scanAndMergeFoldersToFile(Directory(selectedDirectory));
       await processFoldersFromFileSequential();
     } catch (e) {
@@ -192,7 +196,6 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
         processedAt: existing.processedAt,
         attempts: existing.attempts,
         taskId: existing.taskId,
-        accessToken: existing.accessToken, // حفظ accessToken
         isDeleted: false, // عاد المجلد، أصبح غير محذوف
       );
       merged.add(updated);
@@ -223,7 +226,6 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
         processedAt: old.processedAt,
         attempts: old.attempts,
         taskId: old.taskId,
-        accessToken: old.accessToken, // حفظ accessToken
         isDeleted: true,
       );
       merged.add(updated);
@@ -318,7 +320,6 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
       processedAt: processedAt ?? old.processedAt,
       attempts: attempts ?? old.attempts,
       taskId: taskId ?? old.taskId,
-      accessToken: accessToken ?? old.accessToken, // حفظ accessToken
     );
     final newList = List<FolderData>.from(data.folders);
     newList[idx] = updated;
@@ -520,10 +521,28 @@ void addToQueue(FolderData f) {
   successCount.value = 0;
   failureCount.value = 0;
 
-  const int batchSize = 100; // حجم الدفعة
-
+  const int batchSize = 100; 
 
   try {
+    // التحقق من وجود أداة ملف في النموذج قبل بدء المعالجة
+    if (Funcs.form_model == null) {
+      isProcessing.value = false;
+      _showSnackBar('لم يتم تحميل النموذج', false);
+      await LogServices.write('[Folder Processing] لم يتم تحميل النموذج');
+      return;
+    }
+
+    final fileControl = Funcs.form_model!.controls.firstWhereOrNull(
+      (c) => c.type == 7,
+    );
+
+    if (fileControl == null) {
+      isProcessing.value = false;
+      _showSnackBar('لا توجد أداة ملف في النموذج', false);
+      await LogServices.write('[Folder Processing] لا توجد أداة ملف في النموذج');
+      return;
+    }
+
     var data = await _readFoldersData();
     if (data.folders.isEmpty) {
       _showSnackBar('لا توجد مجلدات في ملف الفولدرات للمعالجة', false);
@@ -616,7 +635,9 @@ void addToQueue(FolderData f) {
         }
 
         processedCount.value++;
-        await Future.delayed(const Duration(milliseconds: 300));
+       await LogServices.write('[Folder Processing] تمت معالجه المجلد الابن ${f.name}');
+
+        await Future.delayed(const Duration(seconds: 1));
       }
 
       // Check before moving to next batch
@@ -632,12 +653,21 @@ void addToQueue(FolderData f) {
     // --- بعد المعالجة: إعادة فحص المعلقات والفاشلين مثل السابق تمامًا
     // Only retry if stop was not requested
     if (!Funcs.isStopRequested) {
+      await LogServices.write('[Folder Processing] بداء معالجة الملعقات ');
       await _retryPendingFolders();
     }
 
     // Only show completion message if not stopped
     if (!Funcs.isStopRequested) {
       _showSnackBar('اكتملت المعالجة: ${successCount.value} نجح، ${failureCount.value} فشل', successCount.value > 0);
+      Get.defaultDialog(
+       actions: [
+        ElevatedButton(onPressed: (){Get.back();}, child: Text('موافق'))
+       ],
+       title: 'النتجية',
+       middleText: 'العمليات الناجحه:${successCount}\ العمليات الفاشله: ${failureCount}\n',
+
+      );
     }
 
   } catch (e, st) {
@@ -663,14 +693,17 @@ void addToQueue(FolderData f) {
   Future<ProcessingResult> _processSingleSubfolderWrapped(
     Directory subfolder,
   ) async {
+
     final folderName = subfolder.path.split(Platform.pathSeparator).last;
     //This Comment is so Important do not remove it
     // Step 1: Parse folder name
+    await LogServices.write('[Folder Processing] بداء فصل الاسم ');
+    
     final parsed = _parserService.parseFolderName(folderName);
     if (parsed == null) {
     // Parsing failed - invalid pattern
     await _saveFailure(Record( originalName: folderName, parsedName: null, errorMessage: 'اسم المجلد لا يتطابق مع النمط المطلوب', timestamp: DateTime.now(), folderPath: subfolder.path, ));
-    
+    await LogServices.write('[Folder Processing]فشل في فصل اسم المجلد');
     // Add error first
     Funcs.errors.add('اسم المجلد لا يتطابق مع النمط المطلوب: $folderName');
     
@@ -683,6 +716,7 @@ void addToQueue(FolderData f) {
         ProcessingStatus.Error,
         errorMessage: 'تم إيقاف المعالجة حسب الطلب',
       );
+      
     }
     
     // Only show snackbar if stop was NOT requested
@@ -698,7 +732,7 @@ void addToQueue(FolderData f) {
         );
     
     }
-
+    await LogServices.write('[Folder Processing]  تم فصل الاسم بنجاح بداء المعالجة');
     try {
       final connectedControl = Funcs.form_model?.controls.firstWhereOrNull(
         (c) => c.type == 16,
@@ -712,6 +746,7 @@ void addToQueue(FolderData f) {
 
       // Check if stop was requested before starting API calls
       if (Funcs.isStopRequested) {
+        await LogServices.write('[Folder Processing] تم ايقاف المعالجة حسب الطلب');
         return ProcessingResult(
           ProcessingStatus.Error,
           errorMessage: 'تم إيقاف المعالجة حسب الطلب',
@@ -726,20 +761,26 @@ void addToQueue(FolderData f) {
 
       // Check again after API call
       if (Funcs.isStopRequested) {
+        await LogServices.write('[Folder Processing] تم ايقاف المعالجة حسب الطلب');
         return ProcessingResult(
           ProcessingStatus.Error,
           errorMessage: 'تم إيقاف المعالجة حسب الطلب',
         );
       }
-
-      print('response: $response');
+      await LogServices.write('[Folder Processing]Get First Match response: $response');
+       print('response received');
       final valueMap = _asValueMap(response['value']);
       if (valueMap == null || valueMap.isEmpty) {
+        
+        await LogServices.write('[Folder Processing] لا توجد بيانات مطابقة للمجلد');
         return ProcessingResult(
           ProcessingStatus.Empty,
           errorMessage: 'لا توجد بيانات مطابقة للمجلد',
         );
       }
+
+      // معالجة الحقول التي type == 5 (تحويل التاريخ وإزالة type)
+      await _processDateFieldsInValueMap(valueMap);
 
       await _openPreviewDialog(valueMap);
 
@@ -766,10 +807,19 @@ void addToQueue(FolderData f) {
             errorMessage: 'تم إيقاف المعالجة حسب الطلب',
           );
         }
-
+        await LogServices.write('[Folder Processing] بداء بناء payload ${jsonEncode(valueMap)}');
         final payload = await _formController?.buildSubmitPayload();
-        if (payload == null) print('فشل بناء payload');
-
+        if (payload == null) {
+          await LogServices.write('[Folder Processing] فشل بناء payload');
+          print('فشل بناء payload');
+          await _closePreviewDialogIfAny();
+          return ProcessingResult(
+            ProcessingStatus.Error,
+            errorMessage: 'فشل بناء payload',
+          );
+        } else {
+          await LogServices.write('[Folder Processing] تم بناء payload بنجاح');
+        }
         // Check before submitting
         if (Funcs.isStopRequested) {
           await _closePreviewDialogIfAny();
@@ -780,9 +830,12 @@ void addToQueue(FolderData f) {
         }
 
         final uploadFolderName = payload['foldername'] ?? 'unknown';
-        print('payload: ${jsonEncode(payload)}');
+        final sanitizedPayload = Funcs.sanitizeResponse(jsonEncode(payload));
+        print('payload: $sanitizedPayload');
+        await LogServices.write('[Folder Processing] submitForm payload: $sanitizedPayload');
         final submitResponse = await _apiClient.submitForm(payload);
-        print('submitResponse: ${jsonEncode(submitResponse)}');
+        final sanitizedResponse = Funcs.sanitizeResponse(jsonEncode(submitResponse));
+        print('submitResponse: $sanitizedResponse');
 
         // Check after submitting
         if (Funcs.isStopRequested) {
@@ -798,6 +851,7 @@ void addToQueue(FolderData f) {
 
         if (initial.status == SubmissionStatus.success) {
           final applyId = initial.applyId!;
+          await LogServices.write('[Folder Processing] تم الرفع والإرسال بنجاح للمجلد ${folderName}');
           await _saveSuccess(
             Record(
               originalName: folderName,
@@ -813,6 +867,7 @@ void addToQueue(FolderData f) {
 
         if (initial.status == SubmissionStatus.pending) {
           // حساب حجم المجلد لتحديد مهلة السماح المناسبة
+          await LogServices.write('[Folder Processing] قيد الانتظار للمجلد ${folderName}');
           final folderBytes = await _directorySize(subfolder);
           final cfg = pollConfigForSizeBytes(folderBytes);
 
@@ -895,6 +950,7 @@ void addToQueue(FolderData f) {
             );
           } catch (e) {
             // خطأ خلال الاستعلام — سجّله كفشل موقّت
+            await LogServices.write('[Folder Processing] خطأ أثناء نافذة السماح: $e');
             Funcs.errors.add('خطأ أثناء نافذة السماح: $e');
             await _saveFailure(
               Record(
@@ -934,6 +990,7 @@ void addToQueue(FolderData f) {
           errorMessage: initial.errorMessage ?? 'فشل الإرسال',
         );
       } catch (apiError) {
+        await LogServices.write('[Folder Processing] خطأ في الإرسال: $apiError');
         Funcs.errors.add('خطأ في الإرسال: $apiError');
         await _saveFailure(
           Record(
@@ -961,6 +1018,7 @@ void addToQueue(FolderData f) {
         await _closePreviewDialogIfAny();
       }
     } catch (searchError) {
+      await LogServices.write('[Folder Processing] خطأ في البحث: $searchError');
       Funcs.errors.add('خطأ في البحث: $searchError');
       await _saveFailure(
         Record(
@@ -1108,6 +1166,96 @@ void addToQueue(FolderData f) {
 
   Map<String, dynamic>? _asValueMap(dynamic raw) {
     return SubmissionService.asValueMap(raw);
+  }
+
+  /// تحويل التاريخ إلى صيغة YYYY-MM-DD HH24:MI:SS
+  String _convertDateToFormat(String? dateValue) {
+    if (dateValue == null || dateValue.isEmpty) {
+      return '';
+    }
+
+    try {
+      // محاولة تحويل التاريخ من صيغ مختلفة
+      DateTime? dateTime;
+      
+      // محاولة تحويل من ISO format
+      try {
+        dateTime = DateTime.parse(dateValue);
+      } catch (e) {
+        // محاولة صيغ أخرى شائعة
+        // يمكن إضافة المزيد من الصيغ حسب الحاجة
+        final commonFormats = [
+          'yyyy-MM-dd HH:mm:ss',
+          'yyyy-MM-dd HH:mm',
+          'yyyy-MM-dd',
+          'dd/MM/yyyy HH:mm:ss',
+          'dd/MM/yyyy HH:mm',
+          'dd/MM/yyyy',
+          'MM/dd/yyyy HH:mm:ss',
+          'MM/dd/yyyy HH:mm',
+          'MM/dd/yyyy',
+        ];
+
+        for (final format in commonFormats) {
+          try {
+            dateTime = DateFormat(format).parse(dateValue);
+            break;
+          } catch (e) {
+            continue;
+          }
+        }
+      }
+
+      if (dateTime != null) {
+        return DateFormat('yyyy-MM-dd HH:mm:ss').format(dateTime);
+      }
+      
+      // إذا فشل التحويل، إرجاع القيمة الأصلية
+      return dateValue;
+    } catch (e) {
+      // في حالة الخطأ، إرجاع القيمة الأصلية
+      return dateValue;
+    }
+  }
+
+  /// معالجة valueMap: تحويل الحقول التي type == 5 وإزالة حقل type من جميع الحقول
+  Future<void> _processDateFieldsInValueMap(Map<String, dynamic> valueMap) async {
+    await LogServices.write('[Folder Processing] بدء معالجة valueMap (حذف type من جميع الحقول)');
+    int processedCount = 0;
+    
+    // البحث عن جميع الحقول في valueMap
+    for (final entry in valueMap.entries.toList()) {
+      final key = entry.key;
+      final value = entry.value;
+      
+      if (value is Map<String, dynamic>) {
+        // التحقق من وجود حقل type
+        if (value.containsKey('type')) {
+          final type = value['type'];
+          
+          if (type == 5) {
+            // تحويل قيمة التاريخ
+            final dateValue = value['value'];
+            final convertedDate = _convertDateToFormat(dateValue?.toString());
+            
+            // تحديث القيمة وتحويل الـ Map إلى قيمة بسيطة (إزالة type)
+            valueMap[key] = convertedDate;
+            processedCount++;
+            
+            await LogServices.write('[Folder Processing] تم تحويل حقل التاريخ $key: $dateValue -> $convertedDate');
+          } else {
+            // للحقول الأخرى، نحذف حقل type فقط ونحتفظ بالقيمة
+            final fieldValue = value['value'];
+            // استبدال الـ Map بالقيمة فقط (حذف type)
+            valueMap[key] = fieldValue;
+            processedCount++;
+          }
+        }
+      }
+    }
+    
+    await LogServices.write('[Folder Processing] تم معالجة $processedCount حقل (تم حذف type من جميع الحقول)');
+    await LogServices.write('[Folder Processing] valueMap بعد المعالجة: ${jsonEncode(valueMap)}');
   }
 
   int _countUploadedFiles(dynamic controls) {

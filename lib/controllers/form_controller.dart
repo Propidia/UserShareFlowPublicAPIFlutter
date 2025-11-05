@@ -2,12 +2,14 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:intl/intl.dart';
 import 'package:useshareflowpublicapiflutter/minio/MinIOClass.dart';
 import 'package:useshareflowpublicapiflutter/models/process_task.dart';
 import '../models/form_models.dart';
 import '../services/api_client.dart';
 import '../services/task_status_service.dart';
 import '../ui/widgets/task_status_dialog.dart';
+import '../help/funcs.dart';
 
 class FormController extends GetxController {
   // القائمة المعروضة بعد الفلترة
@@ -451,6 +453,9 @@ class FormController extends GetxController {
     final result = <Map<String, dynamic>>[];
 
     for (final control in controls) {
+      if(control.type == 5){
+        result.add(_buildDateControlForSubmit(control));
+      }
       if (control.type == 8) {
         // معالجة الجداول
         result.add(_buildTableControlForSubmit(control));
@@ -473,6 +478,15 @@ class FormController extends GetxController {
     };
   }
 
+  /// بناء أداة تاريخ للإرسال
+  Map<String, dynamic> _buildDateControlForSubmit(ControlModel dateControl) {
+    final dateValue = values[dateControl.id];
+    final dateFormat = DateFormat('yyyy-MM-dd HH:mm:ss').format(dateValue);
+    return {
+      'id': dateControl.id,
+      'value': dateFormat,
+    };
+  }
   /// بناء أداة جدول للإرسال
   Map<String, dynamic> _buildTableControlForSubmit(ControlModel tableControl) {
     final rows = <Map<String, dynamic>>[];
@@ -543,7 +557,8 @@ class FormController extends GetxController {
 
       final response = await ApiClient.instance.submitForm(payload);
 
-      print("reponsed: ${jsonEncode(response)}");
+      final sanitizedResponse = Funcs.sanitizeResponse(jsonEncode(response));
+      print("reponsed: $sanitizedResponse");
 
       final taskStatusService = TaskStatusService.instance;
       final taskResult = await taskStatusService.checkSubmissionStatus(

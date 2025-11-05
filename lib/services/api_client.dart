@@ -12,10 +12,10 @@ class ApiClient {
 
   Map<String, String> get _headers => {
     'Content-Type': 'application/json; charset=utf-8',
-    'API-KEY': AppConfig.apiKey, // <--- تغيير هنا
+    'API-KEY': AppConfig.apiKey,
     'password': AppConfig.password,
-    'phone-user': AppConfig.username, // <--- تغيير هنا
-    'user-key': AppConfig.licenseKey, // <--- تغيير هنا
+    'phone-user': AppConfig.username, 
+    'user-key': AppConfig.licenseKey, 
   };
 
   Uri _uri(String path, [Map<String, String>? query]) {
@@ -85,7 +85,7 @@ class ApiClient {
           .get(uri, headers: _headers)
           .timeout(AppConfig.httpTimeout);
 
-      await LogServices.write('[ApiClient] GetConnectedOptions Response Status: ${res.body}');
+      await LogServices.write('[ApiClient] GetConnectedOptions Response Status: ${res.statusCode}');
       if (res.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
 
@@ -123,7 +123,7 @@ class ApiClient {
       final res = await http
           .get(uri, headers: _headers)
           .timeout(AppConfig.httpTimeout);
-      await LogServices.write('[ApiClient] getDataForm Response Status: ${res.body}');
+      await LogServices.write('[ApiClient] getDataForm Response Status: ${res.statusCode}');
       if (res.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
         await LogServices.write('[ApiClient] ✅ تم جلب بيانات النموذج بنجاح');
@@ -148,6 +148,7 @@ class ApiClient {
           .post(uri, body: jsonEncode(payload), headers: _headers)
           .timeout(AppConfig.httpTimeout);
 
+      final sanitizedBody = Funcs.sanitizeResponse(res.body);
       await LogServices.write('[ApiClient] submitForm Response Status: ${res.body}');
 
       if (res.statusCode == 200) {
@@ -155,8 +156,8 @@ class ApiClient {
         await LogServices.write('[ApiClient] ✅ تم إرسال النموذج بنجاح');
         return data;
       }
-      await LogServices.write('[ApiClient] ❌ فشل إرسال النموذج - Status: ${res.statusCode}, Body: ${res.body}');
-      throw Exception('فشل إرسال النموذج (${res.statusCode}): ${res.body}');
+      await LogServices.write('[ApiClient] ❌ فشل إرسال النموذج - Status: ${res.body}, Body: $sanitizedBody');
+      throw Exception('فشل إرسال النموذج (${res.statusCode})');
     } catch (e) {
       await LogServices.write('[ApiClient] ❌ Exception في submitForm: $e');
       throw Exception('فشل إرسال النموذج: $e');
@@ -174,17 +175,18 @@ class ApiClient {
       if (accessToken != null && accessToken.isNotEmpty) {
         headers = Map<String, String>.from(_headers);
         headers['Authorization'] = 'Bearer $accessToken';
-        await LogServices.write('[ApiClient] 🔑 استخدام accessToken للمصادقة - task_id: $taskId');
+        await LogServices.write('[ApiClient] task_id: $taskId');
       } else {
         headers = _headers;
-        await LogServices.write('[ApiClient] ⚠️ accessToken غير موجود، استخدام الـ headers الأساسية فقط - task_id: $taskId');
+        await LogServices.write('[ApiClient] - task_id: $taskId');
       }
 
       final res = await http
           .get(uri, headers: headers)
           .timeout(AppConfig.httpTimeout);
 
-      await LogServices.write('[ApiClient] checkTaskStatus Response Status: ${res.body} - task_id: $taskId');
+      final sanitizedBody = Funcs.sanitizeResponse(res.body);
+      await LogServices.write('[ApiClient] checkTaskStatus Response Status: ${res.statusCode} - task_id: $taskId - Body: $sanitizedBody');
 
       if (res.statusCode == 200) {
         await LogServices.write('[ApiClient] ✅ تم التحقق من حالة المهمة بنجاح - task_id: $taskId');
@@ -219,7 +221,8 @@ class ApiClient {
     // POST بدون body (يكفي الهيدر)
     final res = await http.post(uri, headers: _headers).timeout(AppConfig.httpTimeout);
 
-    await LogServices.write('[ApiClient] getFirstMatch Response Status: ${res.body} - getFirstMatch');
+    final sanitizedBody = Funcs.sanitizeResponse(res.body);
+    await LogServices.write('[ApiClient] getFirstMatch Response Status: ${res.body} - Body: $sanitizedBody');
 
     if (res.statusCode == 200) {
       await LogServices.write('[ApiClient] ✅ تم العثور على تطابق بنجاح - form_id: $formId, control_id: $controlId');
@@ -238,10 +241,10 @@ class ApiClient {
       await LogServices.write('[ApiClient] ⚠️ لم يتم العثور على تطابق - form_id: $formId, control_id: $controlId, value: $value');
       throw Exception('لم يتم العثور على تطابق');
     }
-    await LogServices.write('[ApiClient] ❌ فشل البحث عن تطابق - Status: ${res.statusCode}, form_id: $formId');
-    Funcs.errors.add('فشل البحث عن تطابق (${res.statusCode}): ${res.body}');
+    await LogServices.write('[ApiClient] ❌ فشل البحث عن تطابق - Status: ${res.body}, form_id: $formId');
+    Funcs.errors.add('فشل البحث عن تطابق (${res.statusCode})');
     await Funcs.checkRepeatingErrors();
-    throw Exception('فشل البحث عن تطابق (${res.statusCode}): ${res.body}');
+    throw Exception('فشل البحث عن تطابق (${res.statusCode})');
   } catch (e) {
     await LogServices.write('[ApiClient] ❌ Exception في getFirstMatch - form_id: $formId, control_id: $controlId, الخطأ: $e');
     throw Exception('خطأ في البحث عن تطابق: $e');
