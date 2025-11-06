@@ -192,11 +192,42 @@ class ApiClient {
         await LogServices.write('[ApiClient] ✅ تم التحقق من حالة المهمة بنجاح - task_id: $taskId');
         return utf8.decode(res.bodyBytes);
       }
+      if (res.statusCode == 401) {
+        await LogServices.write('[ApiClient] ❌ access token منتهي الصلاحية - task_id: $taskId');
+        throw Exception('Unauthorized: access token منتهي الصلاحية');
+      }
       await LogServices.write('[ApiClient] ❌ فشل التحقق من حالة المهمة - Status: ${res.statusCode}, task_id: $taskId');
       throw Exception('فشل التحقق من حالة المهمة (${res.statusCode})');
     } catch (e) {
       await LogServices.write('[ApiClient] ❌ Exception في checkTaskStatus - task_id: $taskId, الخطأ: $e');
       throw Exception('خطأ في التحقق من حالة المهمة: ${e.toString()}');
+    }
+  }
+
+  /// تجديد access token باستخدام refresh token
+  Future<Map<String, dynamic>> refreshAccessToken(String refreshToken) async {
+    await LogServices.write('[ApiClient] بدء تجديد access token');
+    try {
+      final uri = _uri('api/refresh_token'); // تأكد من تغيير المسار حسب API الخاص بك
+      final body = jsonEncode({'refresh_token': refreshToken});
+      
+      final res = await http
+          .post(uri, body: body, headers: _headers)
+          .timeout(AppConfig.httpTimeout);
+      
+      final sanitizedBody = Funcs.sanitizeResponse(res.body);
+      await LogServices.write('[ApiClient] refreshAccessToken Response Status: ${res.statusCode} - Body: $sanitizedBody');
+
+      if (res.statusCode == 200) {
+        final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
+        await LogServices.write('[ApiClient] ✅ تم تجديد access token بنجاح');
+        return data;
+      }
+      await LogServices.write('[ApiClient] ❌ فشل تجديد access token - Status: ${res.statusCode}');
+      throw Exception('فشل تجديد access token (${res.statusCode})');
+    } catch (e) {
+      await LogServices.write('[ApiClient] ❌ Exception في refreshAccessToken: $e');
+      throw Exception('خطأ في تجديد access token: $e');
     }
   }
 

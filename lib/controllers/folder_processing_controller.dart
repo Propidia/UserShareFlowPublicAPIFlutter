@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -31,8 +32,10 @@ class FolderProcessingController extends GetxController {
   final totalCount = 0.obs;
   final successCount = 0.obs;
   final failureCount = 0.obs;
+  final department = 'default'.obs;
   // قائمة المهام (يمكن استخدامها للعرض اللحظي إن رغبت)
   final RxList<ProcessingTask> tasks = <ProcessingTask>[].obs;
+  final TextEditingController  textEditingController = TextEditingController();
   // مؤشر لإدارة حالة الديالوج
   bool _dialogOpen = false;
   dynamic _formController;
@@ -117,15 +120,36 @@ class FolderProcessingController extends GetxController {
   // --- Pick & Process
   Future<void> pickAndProcessFolder() async {
     try {
-      final selectedDirectory = await FilePicker.platform.getDirectoryPath();
+          // final result = await Get.defaultDialog(
+          //   title: "الرجاء تحديد القسم",
+          //   actions: [
+          //     ElevatedButton(onPressed:(){
+          //       department.value = textEditingController.text.trim();
+          //       if(department.value =='default' || department.value ==''){
+          //           _showSnackBar('الرجاء ادخال القسم', false);
+          //         }else{   
+
+          //           Get.back(result: true);
+          //         }
+          //       } , child: Text('موافق'))
+          //   ],
+          //   content:TextField(
+          //     controller: textEditingController,
+          //     keyboardType: TextInputType.text,
+              
+          //   ),
+          // );
+          // if(result == true){
+             final selectedDirectory = await FilePicker.platform.getDirectoryPath();
       if (selectedDirectory == null) {
         _showSnackBar('لم يتم اختيار أي مجلد', false);
        await LogServices.write('[Folder Processing] لم يتم اختيار مجلد اب');
         return;
       }
-       await LogServices.write('[Folder Processing] تم اختيار مجلد اب');
+      await LogServices.write('[Folder Processing] تم اختيار مجلد اب');
       await scanAndMergeFoldersToFile(Directory(selectedDirectory));
       await processFoldersFromFileSequential();
+          // }
     } catch (e) {
        Funcs.errors.add('خطأ في اختيار المجلد: $e');
       _showSnackBar('خطأ في اختيار المجلد: $e', false);
@@ -285,7 +309,15 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
   Future<void> _writeFoldersDataAtomic(FoldersData data) async {
     final f = File(_foldersFilePath!);
     final tmp = File('${_foldersFilePath!}.tmp');
-    await tmp.writeAsString( const JsonEncoder.withIndent('  ').convert(data.toJson()),);
+    // تنظيف الـ tokens من المجلدات التي حالتها Success قبل الكتابة
+    final cleanedFolders = data.folders.map((folder) {
+      if (folder.Status == 'Success') {
+        return folder.copyWith(accessToken: null, refreshToken: null);
+      }
+      return folder;
+    }).toList();
+    final cleanedData = FoldersData(folders: cleanedFolders);
+    await tmp.writeAsString( const JsonEncoder.withIndent('  ').convert(cleanedData.toJson()),);
     if (await tmp.exists()) {
 
       if (await f.exists()) {
@@ -305,12 +337,15 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
     int? attempts,
     String? taskId,
     String? accessToken,
+    String? refreshToken,
     DateTime? processedAt,
   }) async {
     final data = await _readFoldersData();
     final idx = data.folders.indexWhere((f) => f.path == path);
     if (idx == -1) return;
     final old = data.folders[idx];
+    // إذا كانت الحالة Success، أزل الـ tokens من الملف
+    final bool shouldRemoveTokens = status == ProcessingStatus.Success;
     final updated = FolderData(
       name: old.name,
       path: old.path,
@@ -320,6 +355,8 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
       processedAt: processedAt ?? old.processedAt,
       attempts: attempts ?? old.attempts,
       taskId: taskId ?? old.taskId,
+      accessToken: shouldRemoveTokens ? null : (accessToken ?? old.accessToken),
+      refreshToken: shouldRemoveTokens ? null : (refreshToken ?? old.refreshToken),
     );
     final newList = List<FolderData>.from(data.folders);
     newList[idx] = updated;
@@ -627,6 +664,7 @@ void addToQueue(FolderData f) {
             attempts: f.attempts + 1,
             taskId: result.taskId,
             accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
           );
         } else {
           await _updateFolderStatus(f.path, ProcessingStatus.Error, result.errorMessage ?? 'خطأ غير معروف',
@@ -699,7 +737,9 @@ void addToQueue(FolderData f) {
     // Step 1: Parse folder name
     await LogServices.write('[Folder Processing] بداء فصل الاسم ');
     
-    final parsed = _parserService.parseFolderName(folderName);
+    // final parsed = _parserService.parseFolderName(folderName,department: department.value);
+    final parsed = folderName;
+    print('parsed: $parsed');
     if (parsed == null) {
     // Parsing failed - invalid pattern
     await _saveFailure(Record( originalName: folderName, parsedName: null, errorMessage: 'اسم المجلد لا يتطابق مع النمط المطلوب', timestamp: DateTime.now(), folderPath: subfolder.path, ));
@@ -756,7 +796,7 @@ void addToQueue(FolderData f) {
       final response = await _apiClient.getFirstMatch(
         formId: Funcs.form_id!,
         controlId: connectedControl.id,
-        value: parsed!.formatted,
+        value: parsed,
       );
 
       // Check again after API call
@@ -855,7 +895,7 @@ void addToQueue(FolderData f) {
           await _saveSuccess(
             Record(
               originalName: folderName,
-              parsedName: parsed!.formatted,
+              parsedName: parsed,
               errorMessage:
                   'تم الرفع والإرسال بنجاح (folder: $uploadFolderName, files: $uploadedCount)',
               timestamp: DateTime.now(),
@@ -891,6 +931,7 @@ void addToQueue(FolderData f) {
             final check = await SubmissionService.pollForGracePeriod(
               taskId: initial.taskId ?? '',
               accessToken: initial.accessToken,
+              refreshToken: initial.refreshToken,
               grace: cfg.grace,
               pollInterval: cfg.pollInterval,
               perAttemptTimeout: cfg.perAttemptTimeout,
@@ -913,7 +954,7 @@ void addToQueue(FolderData f) {
               await _saveSuccess(
                 Record(
                   originalName: folderName,
-                  parsedName: parsed!.formatted,
+                  parsedName: parsed,
                   errorMessage: 'تم الرفع والإرسال بنجاح (applyId: $applyId)',
                   timestamp: DateTime.now(),
                   folderPath: subfolder.path,
@@ -933,7 +974,7 @@ void addToQueue(FolderData f) {
             }
 
             // بقي Pending بعد نافذة السماح أو لم نتمكن من استخلاص applyId
-            // سجّل taskId/accessToken (إن وُجدتا) ليعاد فحصها في المرور الثاني
+            // سجّل taskId/accessToken/refreshToken (إن وُجدت) ليعاد فحصها في المرور الثاني
             await _updateFolderStatus(
               subfolder.path,
               ProcessingStatus.Processing,
@@ -941,12 +982,14 @@ void addToQueue(FolderData f) {
               attempts: null, // سيزيد attempts في النداء الأعلى
               taskId: initial.taskId,
               accessToken: initial.accessToken,
+              refreshToken: initial.refreshToken,
             );
 
             return ProcessingResult(
               ProcessingStatus.Processing,
               taskId: initial.taskId,
               accessToken: initial.accessToken,
+              refreshToken: initial.refreshToken,
             );
           } catch (e) {
             // خطأ خلال الاستعلام — سجّله كفشل موقّت
@@ -955,7 +998,7 @@ void addToQueue(FolderData f) {
             await _saveFailure(
               Record(
                 originalName: folderName,
-                parsedName: parsed!.formatted,
+                parsedName: parsed,
                 errorMessage: 'خطأ أثناء نافذة السماح: $e',
                 timestamp: DateTime.now(),
                 folderPath: subfolder.path,
@@ -995,7 +1038,7 @@ void addToQueue(FolderData f) {
         await _saveFailure(
           Record(
             originalName: folderName,
-            parsedName: parsed!.formatted,
+            parsedName: parsed,
             errorMessage: apiError.toString(),
             timestamp: DateTime.now(),
             folderPath: subfolder.path,
@@ -1023,7 +1066,7 @@ void addToQueue(FolderData f) {
       await _saveFailure(
         Record(
           originalName: folderName,
-          parsedName: parsed!.formatted,
+          parsedName: parsed,
           errorMessage: searchError.toString(),
           timestamp: DateTime.now(),
           folderPath: subfolder.path,
@@ -1340,7 +1383,7 @@ Future<void> _retryPendingFolders() async {
   final retryDelays = <Duration>[
     const Duration(seconds: 5),
     const Duration(seconds: 15),
-    const Duration(seconds: 20)
+    const Duration(seconds: 60)
   ];
   final maxAttempts = retryDelays.length;
 
@@ -1365,8 +1408,9 @@ Future<void> _retryPendingFolders() async {
         final check = await SubmissionService.pollForGracePeriod(
           taskId: pf.taskId!,
           accessToken: pf.accessToken, // استخدام accessToken المحفوظ
-          grace: const Duration(seconds: 5),
-          pollInterval: const Duration(seconds: 1),
+          refreshToken: pf.refreshToken, // استخدام refreshToken المحفوظ
+          grace: const Duration(seconds: 20),
+          pollInterval: const Duration(seconds: 3),
           perAttemptTimeout: Duration(seconds: 35 + (attempt * 10)), // ازدياد المهلة مع المحاولات (35 ثانية كحد أدنى)
           shouldStop: () => Funcs.isStopRequested,
         );

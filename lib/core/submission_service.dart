@@ -11,6 +11,7 @@ class SubmissionCheckResult {
   final int? applyId;
   final String? taskId;
   final String? accessToken;
+  final String? refreshToken;
   final String? errorMessage;
 
   const SubmissionCheckResult._({
@@ -18,17 +19,19 @@ class SubmissionCheckResult {
     this.applyId,
     this.taskId,
     this.accessToken,
+    this.refreshToken,
     this.errorMessage,
   });
 
   factory SubmissionCheckResult.success(int applyId) =>
       SubmissionCheckResult._(status: SubmissionStatus.success, applyId: applyId);
 
-  factory SubmissionCheckResult.pending(String taskId, String? accessToken) =>
+  factory SubmissionCheckResult.pending(String taskId, String? accessToken, String? refreshToken) =>
       SubmissionCheckResult._(
         status: SubmissionStatus.pending,
         taskId: taskId,
         accessToken: accessToken,
+        refreshToken: refreshToken,
       );
 
   factory SubmissionCheckResult.error(String message) =>
@@ -88,8 +91,9 @@ class SubmissionService {
         return SubmissionCheckResult.error('لم يتم إرجاع task_id أو apply_id من السيرفر');
       }
       final accessToken = _extractAccessToken(response);
+      final refreshToken = _extractRefreshToken(response);
       await LogServices.write('[SubmissionService] الإرسال قيد الانتظار - task_id: $taskId');
-      return SubmissionCheckResult.pending(taskId, accessToken);
+      return SubmissionCheckResult.pending(taskId, accessToken, refreshToken);
     } catch (e) {
       await LogServices.write('[SubmissionService] خطأ في checkSubmissionStatus: $e');
       return SubmissionCheckResult.error('خطأ في فحص حالة الإرسال: $e');
@@ -100,6 +104,7 @@ class SubmissionService {
    static Future<SubmissionCheckResult> pollForGracePeriod({
     required String taskId,
     String? accessToken,
+    String? refreshToken,
     Duration grace = const Duration(seconds: 8),
     Duration pollInterval = const Duration(seconds: 4),
     Duration perAttemptTimeout = const Duration(seconds: 35),
@@ -108,127 +113,150 @@ class SubmissionService {
     await LogServices.write('[pollForGracePeriod] بدء الاستعلام عن حالة المهمة - task_id: $taskId, grace: ${grace.inSeconds} ثانية');
     final deadline = DateTime.now().add(grace);
     int attemptCount = 0;
+    // متغيرات لتتبع الـ tokens الحالية (قد تتغير عند refresh)
+    String? currentAccessToken = accessToken;
+    String? currentRefreshToken = refreshToken;
 
     while (DateTime.now().isBefore(deadline)) {
       attemptCount++;
       // Check if stop was requested before each poll iteration
       if (shouldStop != null && shouldStop()) {
         await LogServices.write('[pollForGracePeriod] تم إيقاف الاستعلام حسب الطلب - task_id: $taskId');
-        return SubmissionCheckResult.pending(taskId, accessToken);
+        return SubmissionCheckResult.pending(taskId, currentAccessToken, currentRefreshToken);
       }
 
       try {
         await LogServices.write('[pollForGracePeriod] محاولة الاستعلام #$attemptCount - task_id: $taskId');
         // اجلب النتيجة من ApiClient - قد تُعيد String أو Map أو JSON-string
-        final raw = await ApiClient.instance
-            .checkTaskStatus(taskId, accessToken: accessToken)
-            .timeout(perAttemptTimeout);
+        try {
+          final raw = await ApiClient.instance
+              .checkTaskStatus(taskId, accessToken: currentAccessToken)
+              .timeout(perAttemptTimeout);
 
         await LogServices.write('[pollForGracePeriod] تم استلام استجابة من السيرفر - task_id: $taskId, نوع البيانات: ${raw.runtimeType}');
 
-        // Check again after API call
-        if (shouldStop != null && shouldStop()) {
-          await LogServices.write('[pollForGracePeriod] تم إيقاف الاستعلام بعد الاتصال بالسيرفر - task_id: $taskId');
-          return SubmissionCheckResult.pending(taskId, accessToken);
-        }
-
-        // نحاول أن نتعامل مع كل الحالات الممكنة:
-        // 1) String نصي
-        // 2) JSON string -> نحاول decode
-        String trimmed = raw.trim();
-        dynamic parsed;
-        // حاول decode إذا كان JSON محاطًا بأقواس
-        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-          try {
-            parsed = jsonDecode(trimmed);
-            await LogServices.write('[pollForGracePeriod] تم تحليل JSON بنجاح - task_id: $taskId');
-          } catch (e) {
-            parsed = null;
-            await LogServices.write('[pollForGracePeriod] فشل تحليل JSON - task_id: $taskId, الخطأ: $e');
-          }
-        }
-
-        // 1) إذا وجدنا apply_id ضمن parsed (Map) -> نجاح
-        if (parsed is Map) {
-          // حاول استخراج apply_id بأكثر من مفتاح ممكن
-          final apply = parsed['apply_id'] ?? parsed['applyId'] ?? parsed['id'] ?? parsed['result'];
-          final maybe = apply is int ? apply : int.tryParse('${apply ?? ''}');
-          if (maybe != null && maybe > 0) {
-            await LogServices.write('[pollForGracePeriod] ✅ نجح الاستعلام - تم الحصول على apply_id: $maybe من task_id: $taskId');
-            return SubmissionCheckResult.success(maybe);
+          // Check again after API call
+          if (shouldStop != null && shouldStop()) {
+            await LogServices.write('[pollForGracePeriod] تم إيقاف الاستعلام بعد الاتصال بالسيرفر - task_id: $taskId');
+            return SubmissionCheckResult.pending(taskId, currentAccessToken, currentRefreshToken);
           }
 
-          // وإلا: حاول استخراج رسائل/كود حالة لو موجودة
-          final stateStr = (parsed['status'] ?? parsed['state'] ?? parsed['result'] ?? '').toString().toLowerCase();
-          final isPending = stateStr.isEmpty ||
-              stateStr == 'null' ||
-              stateStr == 'none' ||
-              stateStr == 'queued' ||
-              stateStr == 'pending' ||
-              stateStr == 'in_progress' ||
-              stateStr == 'running' ||
-              stateStr.contains('wait') ||
-              stateStr.contains('queue');
-
-          if (!isPending && stateStr.isNotEmpty) {
-            await LogServices.write('[pollForGracePeriod] ❌ خطأ في تنفيذ المهمة - task_id: $taskId, الحالة: $stateStr');
-            return SubmissionCheckResult.error('خطأ في تنفيذ المهمة: $stateStr');
-          }
-        }
-
-        // 2) إذا parsed هو List حاول أخذ أول عنصر إن كان Map
-        if (parsed is List && parsed.isNotEmpty && parsed.first is Map) {
-          final maybeApply = (parsed.first as Map)['apply_id'] ?? (parsed.first as Map)['applyId'];
-          final ap = maybeApply is int ? maybeApply : int.tryParse('${maybeApply ?? ''}');
-          if (ap != null && ap > 0) {
-            await LogServices.write('[pollForGracePeriod] ✅ نجح الاستعلام من List - apply_id: $ap من task_id: $taskId');
-            return SubmissionCheckResult.success(ap);
-          }
-        }
-
-        // 3) إذا مجرد نص (trimmed) جرب تحويله لعدد أو استخدم قواعد السلاسل
-        if (trimmed.isNotEmpty) {
-          final applyId = int.tryParse(trimmed);
-          if (applyId != null && applyId > 0) {
-            await LogServices.write('[pollForGracePeriod] ✅ نجح الاستعلام من نص - apply_id: $applyId من task_id: $taskId');
-            return SubmissionCheckResult.success(applyId);
+          // نحاول أن نتعامل مع كل الحالات الممكنة:
+          // 1) String نصي
+          // 2) JSON string -> نحاول decode
+          String trimmed = raw.trim();
+          dynamic parsed;
+          // حاول decode إذا كان JSON محاطًا بأقواس
+          if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+            try {
+              parsed = jsonDecode(trimmed);
+              await LogServices.write('[pollForGracePeriod] تم تحليل JSON بنجاح - task_id: $taskId');
+            } catch (e) {
+              parsed = null;
+              await LogServices.write('[pollForGracePeriod] فشل تحليل JSON - task_id: $taskId, الخطأ: $e');
+            }
           }
 
-          final s = trimmed.toLowerCase();
-          final isPending = s == 'null' ||
-              s == 'none' ||
-              s == 'queued' ||
-              s == 'pending' ||
-              s == 'in_progress' ||
-              s == 'running' ||
-              s == 'processing' ||
-              s.isEmpty ||
-              s.contains('wait') ||
-              s.contains('queue');
+          // 1) إذا وجدنا apply_id ضمن parsed (Map) -> نجاح
+          if (parsed is Map) {
+            // حاول استخراج apply_id بأكثر من مفتاح ممكن
+            final apply = parsed['apply_id'] ?? parsed['applyId'] ?? parsed['id'] ?? parsed['result'];
+            final maybe = apply is int ? apply : int.tryParse('${apply ?? ''}');
+            if (maybe != null && maybe > 0) {
+              await LogServices.write('[pollForGracePeriod] ✅ نجح الاستعلام - تم الحصول على apply_id: $maybe من task_id: $taskId');
+              return SubmissionCheckResult.success(maybe);
+            }
 
-          if (!isPending) {
-            await LogServices.write('[pollForGracePeriod] ❌ خطأ في تنفيذ المهمة - task_id: $taskId, الرسالة: $trimmed');
-            return SubmissionCheckResult.error('خطأ في تنفيذ المهمة: $trimmed');
+            // وإلا: حاول استخراج رسائل/كود حالة لو موجودة
+            final stateStr = (parsed['status'] ?? parsed['state'] ?? parsed['result'] ?? '').toString().toLowerCase();
+            final isPending = stateStr.isEmpty ||
+                stateStr == 'null' ||
+                stateStr == 'none' ||
+                stateStr == 'queued' ||
+                stateStr == 'pending' ||
+                stateStr == 'in_progress' ||
+                stateStr == 'running' ||
+                stateStr.contains('wait') ||
+                stateStr.contains('queue');
+
+            if (!isPending && stateStr.isNotEmpty) {
+              await LogServices.write('[pollForGracePeriod] ❌ خطأ في تنفيذ المهمة - task_id: $taskId, الحالة: $stateStr');
+              return SubmissionCheckResult.error('خطأ في تنفيذ المهمة: $stateStr');
+            }
           }
+
+          // 2) إذا parsed هو List حاول أخذ أول عنصر إن كان Map
+          if (parsed is List && parsed.isNotEmpty && parsed.first is Map) {
+            final maybeApply = (parsed.first as Map)['apply_id'] ?? (parsed.first as Map)['applyId'];
+            final ap = maybeApply is int ? maybeApply : int.tryParse('${maybeApply ?? ''}');
+            if (ap != null && ap > 0) {
+              await LogServices.write('[pollForGracePeriod] ✅ نجح الاستعلام من List - apply_id: $ap من task_id: $taskId');
+              return SubmissionCheckResult.success(ap);
+            }
+          }
+
+          // 3) إذا مجرد نص (trimmed) جرب تحويله لعدد أو استخدم قواعد السلاسل
+          if (trimmed.isNotEmpty) {
+            final applyId = int.tryParse(trimmed);
+            if (applyId != null && applyId > 0) {
+              await LogServices.write('[pollForGracePeriod] ✅ نجح الاستعلام من نص - apply_id: $applyId من task_id: $taskId');
+              return SubmissionCheckResult.success(applyId);
+            }
+
+            final s = trimmed.toLowerCase();
+            final isPending = s == 'null' ||
+                s == 'none' ||
+                s == 'queued' ||
+                s == 'pending' ||
+                s == 'in_progress' ||
+                s == 'running' ||
+                s == 'processing' ||
+                s.isEmpty ||
+                s.contains('wait') ||
+                s.contains('queue');
+
+            if (!isPending) {
+              await LogServices.write('[pollForGracePeriod] ❌ خطأ في تنفيذ المهمة - task_id: $taskId, الرسالة: $trimmed');
+              return SubmissionCheckResult.error('خطأ في تنفيذ المهمة: $trimmed');
+            }
+          }
+        } catch (e) {
+          // إذا كان الخطأ 401 (Unauthorized)، حاول refresh token
+          if (e.toString().contains('401') || e.toString().contains('Unauthorized')) {
+            if (currentRefreshToken != null && currentRefreshToken.isNotEmpty) {
+              try {
+                final refreshed = await ApiClient.instance.refreshAccessToken(currentRefreshToken);
+                currentAccessToken = refreshed['access_token'] as String?;
+                currentRefreshToken = refreshed['refresh_token'] as String?;
+                await LogServices.write('[pollForGracePeriod] تم تجديد access token بنجاح - task_id: $taskId');
+                // أعيد المحاولة بـ access token الجديد
+                continue;
+              } catch (refreshError) {
+                await LogServices.write('[pollForGracePeriod] فشل تجديد access token - task_id: $taskId');
+                // استمر بدون refresh
+              }
+            }
+          }
+          // تجاهل الأخطاء المؤقتة (timeout، network...) واستمر حتى انتهاء ال grace
+          await LogServices.write('[pollForGracePeriod] ⚠️ خطأ أثناء الاستعلام عن حالة المهمة - task_id: $taskId, الخطأ: $e');
         }
       } catch (e) {
-        // تجاهل الأخطاء المؤقتة (timeout، network...) واستمر حتى انتهاء ال grace
+        // تجاهل الأخطاء الأخرى
         await LogServices.write('[pollForGracePeriod] ⚠️ خطأ أثناء الاستعلام عن حالة المهمة - task_id: $taskId, الخطأ: $e');
-        print('Error polling for grace period: $e');
       }
 
       // Check before delaying
       if (shouldStop != null && shouldStop()) {
         await LogServices.write('[pollForGracePeriod] تم إيقاف الاستعلام قبل التأخير - task_id: $taskId');
-        return SubmissionCheckResult.pending(taskId, accessToken);
+        return SubmissionCheckResult.pending(taskId, currentAccessToken, currentRefreshToken);
       }
 
       await Future.delayed(pollInterval);
     }
 
-    // اذا انتهت النافذة الزمنية نُعيد pending باستخدام الـ taskId الأصلي
+    // اذا انتهت النافذة الزمنية نُعيد pending باستخدام الـ taskId الأصلي والـ tokens المحدثة
     await LogServices.write('[pollForGracePeriod] انتهت نافذة الاستعلام - task_id: $taskId، العودة كـ pending');
-    return SubmissionCheckResult.pending(taskId, accessToken);
+    return SubmissionCheckResult.pending(taskId, currentAccessToken, currentRefreshToken);
   }
 
   static String? _extractTaskId(Map<String, dynamic> response) {
@@ -261,6 +289,19 @@ class SubmissionService {
     }
     if (response.containsKey('access_token')) {
       return response['access_token'] as String?;
+    }
+    return null;
+  }
+
+  static String? _extractRefreshToken(Map<String, dynamic> response) {
+    if (response.containsKey('details') && response['details'] is Map) {
+      final details = (response['details'] as Map).cast<String, dynamic>();
+      if (details.containsKey('refresh_token')) {
+        return details['refresh_token'] as String?;
+      }
+    }
+    if (response.containsKey('refresh_token')) {
+      return response['refresh_token'] as String?;
     }
     return null;
   }
