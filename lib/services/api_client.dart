@@ -55,7 +55,7 @@ class ApiClient {
       final res = await http
           .get(uri, headers: _headers)
           .timeout(AppConfig.httpTimeout);
-      await LogServices.write('[ApiClient] Response Status: ${res.statusCode}');
+      await LogServices.write('[ApiClient]fetch Form Structure Response Body: ${res.body}');
       if (res.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
         final result = FormStructureModel.fromJson(data);
@@ -85,7 +85,7 @@ class ApiClient {
           .get(uri, headers: _headers)
           .timeout(AppConfig.httpTimeout);
 
-      await LogServices.write('[ApiClient] GetConnectedOptions Response Status: ${res.statusCode}');
+      await LogServices.write('[ApiClient] GetConnectedOptions Response Status: ${res.body}');
       if (res.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
 
@@ -96,6 +96,7 @@ class ApiClient {
                 .whereType<Map>()
                 .map((e) => Map<String, dynamic>.from(e))
                 .toList();
+                await LogServices.write('[ApiClient] GetConnectedOptions Response Data: $items');
           }
           if (items.isNotEmpty) {
             await LogServices.write('[ApiClient] ✅ تم جلب خيارات أداة الربط - العدد: ${items.length}');
@@ -123,7 +124,7 @@ class ApiClient {
       final res = await http
           .get(uri, headers: _headers)
           .timeout(AppConfig.httpTimeout);
-      await LogServices.write('[ApiClient] getDataForm Response Status: ${res.statusCode}');
+      await LogServices.write('[ApiClient] getDataForm Response Status: ${res.body}');
       if (res.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
         await LogServices.write('[ApiClient] ✅ تم جلب بيانات النموذج بنجاح');

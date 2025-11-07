@@ -737,8 +737,8 @@ void addToQueue(FolderData f) {
     // Step 1: Parse folder name
     await LogServices.write('[Folder Processing] بداء فصل الاسم ');
     
-    // final parsed = _parserService.parseFolderName(folderName,department: department.value);
-    final parsed = folderName;
+    final parsed = _parserService.parseFolderName(folderName,department: department.value);
+    // final parsed = folderName;
     print('parsed: $parsed');
     if (parsed == null) {
     // Parsing failed - invalid pattern
@@ -796,7 +796,7 @@ void addToQueue(FolderData f) {
       final response = await _apiClient.getFirstMatch(
         formId: Funcs.form_id!,
         controlId: connectedControl.id,
-        value: parsed,
+        value: parsed.formatted,
       );
 
       // Check again after API call
@@ -895,7 +895,7 @@ void addToQueue(FolderData f) {
           await _saveSuccess(
             Record(
               originalName: folderName,
-              parsedName: parsed,
+              parsedName: parsed.formatted,
               errorMessage:
                   'تم الرفع والإرسال بنجاح (folder: $uploadFolderName, files: $uploadedCount)',
               timestamp: DateTime.now(),
@@ -954,7 +954,7 @@ void addToQueue(FolderData f) {
               await _saveSuccess(
                 Record(
                   originalName: folderName,
-                  parsedName: parsed,
+                  parsedName: parsed.formatted,
                   errorMessage: 'تم الرفع والإرسال بنجاح (applyId: $applyId)',
                   timestamp: DateTime.now(),
                   folderPath: subfolder.path,
@@ -998,7 +998,7 @@ void addToQueue(FolderData f) {
             await _saveFailure(
               Record(
                 originalName: folderName,
-                parsedName: parsed,
+                parsedName: parsed.formatted,
                 errorMessage: 'خطأ أثناء نافذة السماح: $e',
                 timestamp: DateTime.now(),
                 folderPath: subfolder.path,
@@ -1038,7 +1038,7 @@ void addToQueue(FolderData f) {
         await _saveFailure(
           Record(
             originalName: folderName,
-            parsedName: parsed,
+            parsedName: parsed.formatted,
             errorMessage: apiError.toString(),
             timestamp: DateTime.now(),
             folderPath: subfolder.path,
@@ -1066,7 +1066,7 @@ void addToQueue(FolderData f) {
       await _saveFailure(
         Record(
           originalName: folderName,
-          parsedName: parsed,
+          parsedName: parsed.formatted,
           errorMessage: searchError.toString(),
           timestamp: DateTime.now(),
           folderPath: subfolder.path,
@@ -1179,7 +1179,7 @@ void addToQueue(FolderData f) {
     }
   }
 
-  Future<void> _addFilesToFileControl(Directory subfolder) async {
+ Future<void> _addFilesToFileControl(Directory subfolder) async {
     try {
       if (_formController == null) return;
       final fileControl = Funcs.form_model!.controls.firstWhereOrNull((c) => c.type == 7);
@@ -1206,7 +1206,6 @@ void addToQueue(FolderData f) {
       }
     }
   }
-
   Map<String, dynamic>? _asValueMap(dynamic raw) {
     return SubmissionService.asValueMap(raw);
   }

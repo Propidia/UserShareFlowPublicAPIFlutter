@@ -43,9 +43,8 @@ class LogServices {
             "***********************\nTime: [$timeStamp] $errorContent\n**************************************\n";
 
         // Write log in background isolate to avoid blocking the main thread
-        unawaited(
-          compute<_LogParams, void>(_writeInIsolate, _LogParams(path, fullLine)),
-        );
+        // استخدام await لضمان اكتمال الكتابة قبل المتابعة
+        await compute<_LogParams, void>(_writeInIsolate, _LogParams(path, fullLine));
       } catch (e) {
         // Log locally if file write failed
         debugPrint("Error in LogServices while attempting to write to log file: $e");

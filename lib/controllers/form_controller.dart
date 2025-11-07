@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
+import 'package:useshareflowpublicapiflutter/help/log.dart';
 import 'package:useshareflowpublicapiflutter/minio/MinIOClass.dart';
 import 'package:useshareflowpublicapiflutter/models/process_task.dart';
 import '../models/form_models.dart';
@@ -399,22 +400,7 @@ class FormController extends GetxController {
     String folderName = 'noFolder';
     print('🚀 بدء رفع ملفات النموذج إلى MinIO...');
 
-    // تمرير values مباشرة إلى uploadFormFilesToMinIOValues (تعدل base64/path وتضيف foldername)
-    var uploadResult = await MinIOClass().uploadFormFilesToMinIOValues(
-      values,
-      'api_applys',
-    );
-
-    // دائماً التقط foldername المرجع من الدالة (قد توجد ملفات رُفعت جزئياً)
-    folderName = uploadResult.$2;
-    if (uploadResult.$1 == "success") {
-      print('✅ تم رفع جميع الملفات بنجاح، folder: $folderName');
-    } else {
-      print(
-        '⚠️ تحذير: مشكلة في رفع الملفات: ${uploadResult.$1}, folder: $folderName',
-      );
-    }
-
+    // بناء الـ payload أولاً (قبل رفع الملفات) لتمريره إلى uploadFormFilesToMinIOValues
     final controls = _buildControlsForSubmit(form.controls);
 
     // البحث عن foldername في الملفات وإزالته
@@ -437,6 +423,36 @@ class FormController extends GetxController {
       return cleanedControl;
     }).toList();
 
+    // بناء payload مؤقت (بدون foldername) لتمريره إلى uploadFormFilesToMinIOValues
+    final tempPayload = {
+      'id': form.id,
+      'controls': cleanedControls,
+    };
+
+    // تمرير values و payload الكامل إلى uploadFormFilesToMinIOValues
+    // (تعدل base64/path وتضيف foldername وترفع JSON الكامل)
+    print('🚀 بدء رفع ملفات النموذج إلى MinIO...');
+    print('🚀 tempPayload: $tempPayload');
+    print('🚀 values: $values');
+    var uploadResult = await MinIOClass().uploadFormFilesToMinIOValues(
+      values,
+      'api_applys',
+      completePayload: tempPayload,
+      formStructure: form,
+    );
+    await LogServices.write('[FormController] uploadFormFilesToMinIOValues: $uploadResult');
+
+    // دائماً التقط foldername المرجع من الدالة (قد توجد ملفات رُفعت جزئياً)
+    folderName = uploadResult.$2;
+    if (uploadResult.$1 == "success") {
+      print('✅ تم رفع جميع الملفات بنجاح، folder: $folderName');
+    } else {
+      print(
+        '⚠️ تحذير: مشكلة في رفع الملفات: ${uploadResult.$1}, folder: $folderName',
+      );
+    }
+
+    // إضافة foldername إلى الـ payload النهائي
     final payload = {
       'id': form.id,
       'controls': cleanedControls,
