@@ -500,13 +500,15 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
           if (entry is Map<String, dynamic>) {
             entry['base64'] = uuidPath; // UUID فقط مع الصيغة
             entry['path'] = fullMinIOPath; // المسار الكامل في MinIO
-           
+            entry['file'] = fullMinIOPath; // نفس path - مطلوب للـ Worker
+            
             print('entry updated: base64=$uuidPath, path=$fullMinIOPath, file=$fullMinIOPath');
           }
         } else {
           file['base64'] = uuidPath; // UUID فقط مع الصيغة
           file['path'] = fullMinIOPath; // المسار الكامل في MinIO
-         
+          file['file'] = fullMinIOPath; // نفس path - مطلوب للـ Worker
+          
           print('file updated: base64=$uuidPath, path=$fullMinIOPath, file=$fullMinIOPath');
         }
 
@@ -836,6 +838,29 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
       // استخراج folders و files من القيمة
       List<dynamic>? folders = _extractFoldersFromValue(value);
       List<dynamic>? files = _extractFilesFromValue(value);
+      
+      // إضافة حقول control إلى كل file في files array (مطلوبة للـ Worker)
+      // هذه الحقول تأتي من control وليس من file نفسه
+      if (files != null && files.isNotEmpty && control.type == 7) {
+        // استخدام القيم من control (سيتم تعيينها لاحقاً في fullControl)
+        final parentPathT = '0'; // من control - سيتم استخدامه في Worker
+        
+        for (final file in files) {
+          if (file is Map<String, dynamic>) {
+            // إضافة/تحديث حقول control إلى file
+            // Worker يحتاج هذه الحقول في file object
+            // إذا كانت موجودة في file، نستخدمها، وإلا نستخدم القيم من control
+            if (!file.containsKey('parent_path_t') || file['parent_path_t'] == null) {
+              file['parent_path_t'] = parentPathT;
+            }
+            // path_t يجب أن يكون بناءً على parent_path_t و row_num
+            if (!file.containsKey('path_t') || file['path_t'] == null) {
+              final rowNum = file['row_num'] ?? 0;
+              file['path_t'] = '$parentPathT.$rowNum';
+            }
+          }
+        }
+      }
       
       // استخراج fkappid, fksys, fktpth, connected_type, sel_val من meta والقيمة
       int? fkappid;
