@@ -34,14 +34,24 @@ class _DynamicFormScreenState extends State<DynamicFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: !folderController.isProcessing.value,
-    onPopInvokedWithResult: (didPop, result) async {
-      if (didPop) {
-        folderController.updateUIAfterStopeing();
-      }
-    },
-    child: Scaffold(
+    return Obx(
+      () => PopScope(
+        canPop: !folderController.isProcessing.value,
+        onPopInvokedWithResult: (didPop, result) async {
+          if (didPop) {
+            folderController.updateUIAfterStopeing();
+          } else if (folderController.isProcessing.value) {
+            // عرض رسالة للمستخدم عند محاولة الرجوع أثناء المعالجة
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('لا يمكن الرجوع أثناء المعالجة. يرجى الانتظار حتى تنتهي المعالجة.'),
+                duration: Duration(seconds: 2),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        },
+        child: Scaffold(
       appBar: AppBar(
         title: const Text('نموذج تعبئة البيانات', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.blue.shade700,
@@ -129,6 +139,7 @@ class _DynamicFormScreenState extends State<DynamicFormScreen> {
         );
       }),
     ),
+      ),
     );
   }
 

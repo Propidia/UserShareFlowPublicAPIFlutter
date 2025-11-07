@@ -160,29 +160,6 @@ class FolderProcessingController extends GetxController {
     }
   }
 
-  // Future<void> scanAndWriteFoldersToFile(Directory folder) async {
-  //   await _initFoldersFile();
-
-  //   final discovered = <FolderData>[];
-  //   final stream = folder.list(recursive: false, followLinks: false);
-
-  //   await for (final entity in stream) {
-  //     if (entity is Directory) {
-  //       final name = entity.path.split(Platform.pathSeparator).last;
-  //       discovered.add(FolderData(
-  //         name: name,
-  //         path: entity.path,
-  //         Status: 'Pending',
-  //         StatusMessage: 'Discovered',
-  //         discoveredAt: DateTime.now(),
-  //         attempts: 0,
-  //       ));
-  //     }
-  //   }
-
-  //   final data = FoldersData(folders: discovered);
-  //   await _writeFoldersDataAtomic(data);
-  // }
 
 Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
   await _initFoldersFile();
