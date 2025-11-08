@@ -323,15 +323,13 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
           final dynamic entry = filesList[fileIndex];
           if (entry is Map<String, dynamic>) {
             entry['base64'] = uuidPath; // UUID فقط مع الصيغة
-            entry['path'] = fullMinIOPath; // المسار الكامل في MinIO
-            entry['file'] = fullMinIOPath; // نفس path - مطلوب للـ Worker
+            entry['path'] = fullMinIOPath;// نفس path - مطلوب للـ Worker
             
             print('entry updated: base64=$uuidPath, path=$fullMinIOPath, file=$fullMinIOPath');
           }
         } else {
           file['base64'] = uuidPath; // UUID فقط مع الصيغة
-          file['path'] = fullMinIOPath; // المسار الكامل في MinIO
-          file['file'] = fullMinIOPath; // نفس path - مطلوب للـ Worker
+          file['path'] = fullMinIOPath; // نفس path - مطلوب للـ Worker
           
           print('file updated: base64=$uuidPath, path=$fullMinIOPath, file=$fullMinIOPath');
         }
@@ -358,7 +356,7 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
 
     // إنشاء ملف JSON - بناء JSON كامل يشبه ما يتوقعه الـ worker
     try {
-      print('📝 إنشاء ملف JSON بالبيانات...');
+    //   print('📝 إنشاء ملف JSON بالبيانات...');
       Map<String, dynamic> jsonDataToSave;
       
       if (formStructure != null && completePayload != null) {
@@ -390,15 +388,15 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
         jsonDataToSave = cleanData;
       }
 
-      final jsonData = jsonEncode(jsonDataToSave);
-      final tempDir = await getTemporaryDirectory();
-      final jsonFile = File('${tempDir.path}/$folder_name.json');
-      await jsonFile.writeAsString(jsonData, encoding: utf8);
+      // final jsonData = jsonEncode(jsonDataToSave);
+      // final tempDir = await getTemporaryDirectory();
+      // final jsonFile = File('${tempDir.path}/$folder_name.json');
+      // await jsonFile.writeAsString(jsonData, encoding: utf8);
 
-      final jsonObjectPath = '$folder_name/$folder_name.json';
-      await _minio.fPutObject(bucketName, jsonObjectPath, jsonFile.path);
-      print('✅ تم رفع ملف JSON بنجاح: $jsonObjectPath');
-      print('jsonData: $jsonData');
+      // final jsonObjectPath = '$folder_name/$folder_name.json';
+      // await _minio.fPutObject(bucketName, jsonObjectPath, jsonFile.path);
+      // print('✅ تم رفع ملف JSON بنجاح: $jsonObjectPath');
+      // print('jsonData: $jsonData');
       // await jsonFile.delete();
     } catch (jsonError) {
       print('⚠️ تحذير: فشل إنشاء ملف JSON: $jsonError');

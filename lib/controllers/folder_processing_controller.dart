@@ -1156,74 +1156,102 @@ void addToQueue(FolderData f) {
     }
   }
 
-  Future<void> _addFilesToFileControl(Directory subfolder) async {
+  // Future<void> _addFilesToFileControl(Directory subfolder) async {
+  //   try {
+  //     if (_formController == null) return;
+  //     final fileControl = Funcs.form_model!.controls.firstWhereOrNull((c) => c.type == 7);
+  //     if (fileControl == null) return;
+  //     final files = subfolder.listSync().whereType<File>().toList();
+  //     if (files.isEmpty) return;
+      
+  //     final folderName = subfolder.path.split(Platform.pathSeparator).last;
+      
+  //     final foldersList = <Map<String, dynamic>>[
+  //       {
+  //         'id': null,
+  //         'folder_name': folderName,
+  //         'id_in_code': 1,
+  //         'child_of': null,
+  //         'created_user': Funcs.user_id ?? 0,
+  //         'f_id': Funcs.form_id ?? 0,
+  //         'w_id': 0,
+  //         'status': 'added',
+  //         'obj_id': 0,
+  //         'apply_id': 0,
+  //         'control_id': fileControl.id,
+  //         'apply_form_id': 0,
+  //         'parent_path_t': null,
+  //         'created_in_this_session': true,
+  //         'folder_path': folderName, 
+  //       }
+  //     ];
+      
+  //     final filesList = <Map<String, dynamic>>[];
+  //     int rowNum = 1;
+  //     for (final file in files) {
+  //       final fullPath = file.path;
+  //       final fileName = fullPath.split(Platform.pathSeparator).last;
+  //       final fileExtension = fileName.contains('.') ? fileName.split('.').last : '';
+  //       final fileSize = await file.length();
+  //       final fileNameWithoutExt = fileName.contains('.') ? fileName.split('.').first : fileName;
+        
+  //       filesList.add({
+  //         'id': null,
+  //         'file': fullPath, 
+  //         'path': fullPath, 
+  //         'version': 1,
+  //         'user_id': Funcs.user_id ?? 0,
+  //         'size': fileSize,
+  //         'row_num': rowNum,
+  //         'parent_path_t': '0', 
+  //         'path_t': '0.$rowNum', 
+  //         'original_file_id': null,
+  //         'file_name': fileNameWithoutExt, 
+  //         'file_extension': fileExtension,
+  //         'pages_count': 1,
+  //         'folder_path': folderName,
+  //         'folder_id': 1,
+  //         'status': 'added',
+  //         'old_path': null,       
+  //         'name': fileName,
+  //         'base64': fullPath, 
+  //         'picked_inn_this_session': true,
+  //       });
+  //       rowNum++;
+  //     }
+      
+  //     _formController.setValueWithoutValidation(fileControl.id, {
+  //       'files': filesList,
+  //       'folders': foldersList,
+  //     });
+  //   } catch (e) {
+  //      Funcs.errors.add('خطأ في إضافة الملفات: $e');
+  //     print('خطأ في إضافة الملفات: $e');
+  //      final stop = await Funcs.checkRepeatingErrors();
+  //     if (stop) {
+  //       updateUIAfterStopeing();
+  //     }
+  //   }
+  // }
+
+ Future<void> _addFilesToFileControl(Directory subfolder) async {
     try {
       if (_formController == null) return;
       final fileControl = Funcs.form_model!.controls.firstWhereOrNull((c) => c.type == 7);
       if (fileControl == null) return;
       final files = subfolder.listSync().whereType<File>().toList();
       if (files.isEmpty) return;
-      
-      final folderName = subfolder.path.split(Platform.pathSeparator).last;
-      
-      final foldersList = <Map<String, dynamic>>[
-        {
-          'id': null,
-          'folder_name': folderName,
-          'id_in_code': 1,
-          'child_of': null,
-          'created_user': Funcs.user_id ?? 0,
-          'f_id': Funcs.form_id ?? 0,
-          'w_id': 0,
-          'status': 'added',
-          'obj_id': 0,
-          'apply_id': 0,
-          'control_id': fileControl.id,
-          'apply_form_id': 0,
-          'parent_path_t': null,
-          'created_in_this_session': true,
-          'folder_path': folderName, 
-        }
-      ];
-      
       final filesList = <Map<String, dynamic>>[];
-      int rowNum = 1;
       for (final file in files) {
         final fullPath = file.path;
         final fileName = fullPath.split(Platform.pathSeparator).last;
-        final fileExtension = fileName.contains('.') ? fileName.split('.').last : '';
-        final fileSize = await file.length();
-        final fileNameWithoutExt = fileName.contains('.') ? fileName.split('.').first : fileName;
-        
         filesList.add({
-          'id': null,
-          'file': fullPath, 
-          'path': fullPath, 
-          'version': 1,
-          'user_id': Funcs.user_id ?? 0,
-          'size': fileSize,
-          'row_num': rowNum,
-          'parent_path_t': '0', 
-          'path_t': '0.$rowNum', 
-          'original_file_id': null,
-          'file_name': fileNameWithoutExt, 
-          'file_extension': fileExtension,
-          'pages_count': 1,
-          'folder_path': folderName,
-          'folder_id': 1,
-          'status': 'added',
-          'old_path': null,       
+          'path': fullPath,
           'name': fileName,
-          'base64': fullPath, 
-          'picked_inn_this_session': true,
+          'base64': fullPath,
         });
-        rowNum++;
       }
-      
-      _formController.setValueWithoutValidation(fileControl.id, {
-        'files': filesList,
-        'folders': foldersList,
-      });
+      _formController.setValueWithoutValidation(fileControl.id, {'files': filesList});
     } catch (e) {
        Funcs.errors.add('خطأ في إضافة الملفات: $e');
       print('خطأ في إضافة الملفات: $e');
@@ -1233,6 +1261,7 @@ void addToQueue(FolderData f) {
       }
     }
   }
+
 
   Map<String, dynamic>? _asValueMap(dynamic raw) {
     return SubmissionService.asValueMap(raw);
