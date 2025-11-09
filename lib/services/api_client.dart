@@ -55,7 +55,7 @@ class ApiClient {
       final res = await http
           .get(uri, headers: _headers)
           .timeout(AppConfig.httpTimeout);
-      await LogServices.write('[ApiClient]fetch Form Structure Response Body: ${res.body}');
+      await LogServices.write('[ApiClient]fetch Form Structure Response Body: ${res.statusCode}');
       if (res.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
         final result = FormStructureModel.fromJson(data);
@@ -85,7 +85,7 @@ class ApiClient {
           .get(uri, headers: _headers)
           .timeout(AppConfig.httpTimeout);
 
-      await LogServices.write('[ApiClient] GetConnectedOptions Response Status: ${res.body}');
+      await LogServices.write('[ApiClient] GetConnectedOptions Response Status: ${res.statusCode}');
       if (res.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
 
@@ -124,7 +124,7 @@ class ApiClient {
       final res = await http
           .get(uri, headers: _headers)
           .timeout(AppConfig.httpTimeout);
-      await LogServices.write('[ApiClient] getDataForm Response Status: ${res.body}');
+      await LogServices.write('[ApiClient] getDataForm Response Status: ${res.statusCode}');
       if (res.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
         await LogServices.write('[ApiClient] ✅ تم جلب بيانات النموذج بنجاح');
@@ -143,14 +143,14 @@ class ApiClient {
     await LogServices.write('[ApiClient] بدء إرسال بيانات النموذج');
     try {
       final uri = _uri(AppConfig.submitFormEndpoint);
-      await LogServices.write('[ApiClient] URI: $uri');
+      // await LogServices.write('[ApiClient] URI: $uri');
 
       final res = await http
           .post(uri, body: jsonEncode(payload), headers: _headers)
           .timeout(AppConfig.httpTimeout);
 
       final sanitizedBody = Funcs.sanitizeResponse(res.body);
-      await LogServices.write('[ApiClient] submitForm Response Status: ${res.body}');
+      await LogServices.write('[ApiClient] submitForm Response Status: ${res.statusCode}');
 
       if (res.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
@@ -197,7 +197,7 @@ class ApiClient {
         await LogServices.write('[ApiClient] ❌ access token منتهي الصلاحية - task_id: $taskId');
         throw Exception('Unauthorized: access token منتهي الصلاحية');
       }
-      await LogServices.write('[ApiClient] ❌ فشل التحقق من حالة المهمة - Status: ${res.statusCode}, task_id: $taskId');
+      await LogServices.write('[ApiClient] ❌ فشل التحقق من حالة المهمة - Status: ${res.body}, task_id: $taskId');
       throw Exception('فشل التحقق من حالة المهمة (${res.statusCode})');
     } catch (e) {
       await LogServices.write('[ApiClient] ❌ Exception في checkTaskStatus - task_id: $taskId, الخطأ: $e');
@@ -224,7 +224,7 @@ class ApiClient {
         await LogServices.write('[ApiClient] ✅ تم تجديد access token بنجاح');
         return data;
       }
-      await LogServices.write('[ApiClient] ❌ فشل تجديد access token - Status: ${res.statusCode}');
+      await LogServices.write('[ApiClient] ❌ فشل تجديد access token - Status: ${res.body}');
       throw Exception('فشل تجديد access token (${res.statusCode})');
     } catch (e) {
       await LogServices.write('[ApiClient] ❌ Exception في refreshAccessToken: $e');
@@ -254,7 +254,7 @@ class ApiClient {
     final res = await http.post(uri, headers: _headers).timeout(AppConfig.httpTimeout);
 
     final sanitizedBody = Funcs.sanitizeResponse(res.body);
-    await LogServices.write('[ApiClient] getFirstMatch Response Status: ${res.body} - Body: $sanitizedBody');
+    await LogServices.write('[ApiClient] getFirstMatch Response Status: ${res.statusCode} - Body: $sanitizedBody');
 
     if (res.statusCode == 200) {
       await LogServices.write('[ApiClient] ✅ تم العثور على تطابق بنجاح - form_id: $formId, control_id: $controlId');

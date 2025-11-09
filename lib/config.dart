@@ -6,8 +6,11 @@ class AppConfig {
 
   static const String baseUrl = 'http://10.103.70.67/';
   static const String apiKey = 'a9198549a3b00949355a09d2a';
-  static const String username = '770555246';
-  static const String licenseKey = '84d3e13d81061b2c747fd5f17';
+  // static const String username = '770555246';
+  // static const String licenseKey = '84d3e13d81061b2c747fd5f17';
+
+  static const String username = '771302404';
+  static const String licenseKey = 'de96c5f3ce928abf4f7b1d16e';
 
   // static const String baseUrl = 'http://localhost:8001/';
   // static const String apiKey = '6c6a839ffbcee9709d873056e';

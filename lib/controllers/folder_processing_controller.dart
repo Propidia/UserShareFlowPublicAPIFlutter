@@ -1244,10 +1244,8 @@ void addToQueue(FolderData f) {
       final filesList = <Map<String, dynamic>>[];
       for (final file in files) {
         final fullPath = file.path;
-        final fileName = fullPath.split(Platform.pathSeparator).last;
         filesList.add({
           'path': fullPath,
-          'name': fileName,
           'base64': fullPath,
         });
       }
