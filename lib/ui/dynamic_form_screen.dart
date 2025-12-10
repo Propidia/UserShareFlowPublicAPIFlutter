@@ -39,7 +39,7 @@ class _DynamicFormScreenState extends State<DynamicFormScreen> {
         canPop: !folderController.isProcessing.value,
         onPopInvokedWithResult: (didPop, result) async {
           if (didPop) {
-            folderController.updateUIAfterStopeing();
+            // folderController.updateUIAfterStopeing();
           } else if (folderController.isProcessing.value) {
             // عرض رسالة للمستخدم عند محاولة الرجوع أثناء المعالجة
             ScaffoldMessenger.of(context).showSnackBar(
@@ -216,6 +216,11 @@ class _DynamicFormScreenState extends State<DynamicFormScreen> {
                             icon: Icons.cancel,
                             label: 'فشل: ${folderController.failureCount.value}',
                             color: Colors.red.shade700,
+                          ),
+                          _buildStatText(
+                            icon: Icons.schedule,
+                            label: 'معلق: ${folderController.pendingCount.value}',
+                            color: Colors.orange.shade700,
                           ),
                           _buildStatText(
                             icon: Icons.info,

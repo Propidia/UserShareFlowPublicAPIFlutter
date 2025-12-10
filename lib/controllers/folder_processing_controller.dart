@@ -3,7 +3,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 import 'package:get/get.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -21,21 +21,21 @@ import 'package:useshareflowpublicapiflutter/ui/widgets/dialog_first_match.dart'
 import '../models/folder_parsing_models.dart';
 import '../services/api_client.dart';
 
-
-
 class FolderProcessingController extends GetxController {
   final _apiClient = ApiClient.instance;
   final _parserService = FolderParserService();
   // State
   final isProcessing = false.obs;
   final processedCount = 0.obs;
+  final currentFolderPath = ''.obs;
   final totalCount = 0.obs;
   final successCount = 0.obs;
   final failureCount = 0.obs;
+  final pendingCount = 0.obs; // عدد المعلقات
   final department = 'default'.obs;
   // قائمة المهام (يمكن استخدامها للعرض اللحظي إن رغبت)
   final RxList<ProcessingTask> tasks = <ProcessingTask>[].obs;
-  final TextEditingController  textEditingController = TextEditingController();
+  final TextEditingController textEditingController = TextEditingController();
   // مؤشر لإدارة حالة الديالوج
   bool _dialogOpen = false;
   dynamic _formController;
@@ -46,14 +46,21 @@ class FolderProcessingController extends GetxController {
   RecordStore? _recordStore;
   final queue = <FolderData>[];
   final usedPaths = <String>{};
+  
+  // ملاحظة: startIndex يُستخدم فقط للعرض والإحصائيات
+  // المعالجة الفعلية تبدأ دائماً من 0 لأن الـ queue يُعاد بناؤها في كل مرة
+  
   @override
   void onInit() {
     super.onInit();
-  Future.delayed(const Duration(seconds: 2), () {
-    _initFailuresFile();
-    _initSuccessesFile();
-    _initFoldersFile();
-  });
+    Future.delayed(const Duration(seconds: 2), () async {
+      _initFailuresFile();
+      _initSuccessesFile();
+      _initFoldersFile();
+      // تحديث عدد المعلقات بعد تهيئة الملفات
+      await Future.delayed(const Duration(milliseconds: 500));
+      await _updatePendingCount();
+    });
   }
 
   void setFormController(dynamic controller) {
@@ -83,6 +90,7 @@ class FolderProcessingController extends GetxController {
       print('Error initializing successes file: $e');
     }
   }
+
   Future<void> _initFoldersFile() async {
     try {
       final appDir = await getApplicationDocumentsDirectory();
@@ -99,6 +107,7 @@ class FolderProcessingController extends GetxController {
       print('Error initializing folders file: $e');
     }
   }
+
   Future<void> _initFailuresFile() async {
     try {
       final appDir = await getApplicationDocumentsDirectory();
@@ -116,126 +125,170 @@ class FolderProcessingController extends GetxController {
       print('Error initializing failures file: $e');
     }
   }
-  
+
   // --- Pick & Process
   Future<void> pickAndProcessFolder() async {
     try {
-          // final result = await Get.defaultDialog(
-          //   title: "الرجاء تحديد القسم",
-          //   actions: [
-          //     ElevatedButton(onPressed:(){
-          //       department.value = textEditingController.text.trim();
-          //       if(department.value =='default' || department.value ==''){
-          //           _showSnackBar('الرجاء ادخال القسم', false);
-          //         }else{   
+      // final result = await Get.defaultDialog(
+      //   title: "الرجاء تحديد القسم",
+      //   actions: [
+      //     ElevatedButton(onPressed:(){
+      //       department.value = textEditingController.text.trim();
+      //       if(department.value =='default' || department.value ==''){
+      //           _showSnackBar('الرجاء ادخال القسم', false);
+      //         }else{
 
-          //           Get.back(result: true);
-          //         }
-          //       } , child: Text('موافق'))
-          //   ],
-          //   content:TextField(
-          //     controller: textEditingController,
-          //     keyboardType: TextInputType.text,
-              
-          //   ),
-          // );
-          // if(result == true){
-             final selectedDirectory = await FilePicker.platform.getDirectoryPath();
+      //           Get.back(result: true);
+      //         }
+      //       } , child: Text('موافق'))
+      //   ],
+      //   content:TextField(
+      //     controller: textEditingController,
+      //     keyboardType: TextInputType.text,
+
+      //   ),
+      // );
+      // if(result == true){
+      final selectedDirectory = await FilePicker.platform.getDirectoryPath();
       if (selectedDirectory == null) {
         _showSnackBar('لم يتم اختيار أي مجلد', false);
-       await LogServices.write('[Folder Processing] لم يتم اختيار مجلد اب');
+        await LogServices.write('[Folder Processing] لم يتم اختيار مجلد اب');
         return;
       }
       await LogServices.write('[Folder Processing] تم اختيار مجلد اب');
       await scanAndMergeFoldersToFile(Directory(selectedDirectory));
       await processFoldersFromFileSequential();
-          // }
+      // }
     } catch (e) {
-       Funcs.errors.add('خطأ في اختيار المجلد: $e');
+      Funcs.errors.add('خطأ في اختيار المجلد: $e');
       _showSnackBar('خطأ في اختيار المجلد: $e', false);
-       final stop = await Funcs.checkRepeatingErrors();
+      final stop = await Funcs.checkRepeatingErrors();
       if (stop) {
         updateUIAfterStopeing();
       }
     }
   }
 
-
-Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
-  await _initFoldersFile();
-
-  // اقرأ البيانات الحالية (قد تكون فارغة)
-  final current = await _readFoldersData();
-  final currentByPath = {for (var f in current.folders) f.path: f};
-
-  // اجمع المجلدات الموجودة حالياً
-  final foundPaths = <String, String>{}; // path -> name
-  await for (final entity in parentFolder.list(recursive: false, followLinks: false)) {
-    if (entity is Directory) {
-      final path = entity.path;
-      final name = path.split(Platform.pathSeparator).last;
-      foundPaths[path] = name;
-    }
-  }
-
-  // 1) أضف/حدّث المكتشفين الجدد
-  final merged = <FolderData>[];
-
-  // أضف أو حدّث الموجودين في foundPaths
-  for (final entry in foundPaths.entries) {
-    final path = entry.key;
-    final name = entry.value;
-    final existing = currentByPath[path];
-    if (existing != null) {
-      // لو كان معلم محذوف سابقاً، أعد تفعيله (isDeleted=false) لأن المجلد عاد
-      final updated = FolderData(
-        name: existing.name,
-        path: existing.path,
-        Status: existing.Status == 'Success' ? existing.Status : existing.Status, // لا نغيّر النجاح
-        StatusMessage: existing.StatusMessage,
-        discoveredAt: existing.discoveredAt,
-        processedAt: existing.processedAt,
-        attempts: existing.attempts,
-        taskId: existing.taskId,
-        isDeleted: false, // عاد المجلد، أصبح غير محذوف
+  Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
+    await _initFoldersFile();
+    
+    // إعادة تعيين startIndex عند اختيار مجلد جديد
+    if (currentFolderPath.value != parentFolder.path) {
+      startIndex = 0;
+      await LogServices.write(
+        '[Folder Processing] تم اختيار مجلد جديد - إعادة تعيين startIndex إلى 0',
       );
-      merged.add(updated);
-    } else {
-      // جديد - أضفه كـ Pending
-      merged.add(FolderData(
-        name: name,
-        path: path,
-        Status: 'Pending',
-        StatusMessage: 'Discovered',
-        discoveredAt: DateTime.now(),
-        attempts: 0,
-        isDeleted: false,
-      ));
     }
+    
+    currentFolderPath.value = parentFolder.path;
+
+    // اقرأ البيانات الحالية (قد تكون فارغة)
+    final current = await _readFoldersData();
+    final currentByPath = {for (var f in current.folders) f.path: f};
+
+    // اجمع المجلدات الموجودة حالياً
+    final foundPaths = <String, String>{}; // path -> name
+    await for (final entity in parentFolder.list(
+      recursive: false,
+      followLinks: false,
+    )) {
+      if (entity is Directory) {
+        final path = entity.path;
+        final name = path.split(Platform.pathSeparator).last;
+        foundPaths[path] = name;
+      }
+    }
+
+    // 1) أضف/حدّث المكتشفين الجدد
+    final merged = <FolderData>[];
+
+    // أضف أو حدّث الموجودين في foundPaths
+    for (final entry in foundPaths.entries) {
+      final path = entry.key;
+      final name = entry.value;
+      final existing = currentByPath[path];
+      if (existing != null) {
+        // لو كان معلم محذوف سابقاً، أعد تفعيله (isDeleted=false) لأن المجلد عاد
+        final updated = FolderData(
+          name: existing.name,
+          path: existing.path,
+          Status: existing.Status == 'Success'
+              ? existing.Status
+              : existing.Status, // لا نغيّر النجاح
+          StatusMessage: existing.StatusMessage,
+          discoveredAt: existing.discoveredAt,
+          processedAt: existing.processedAt,
+          attempts: existing.attempts,
+          taskId: existing.taskId,
+          isDeleted: false, // عاد المجلد، أصبح غير محذوف
+        );
+        merged.add(updated);
+      } else {
+        // جديد - أضفه كـ Pending
+        merged.add(
+          FolderData(
+            name: name,
+            path: path,
+            Status: 'Pending',
+            StatusMessage: 'Discovered',
+            discoveredAt: DateTime.now(),
+            attempts: 0,
+            isDeleted: false,
+          ),
+        );
+      }
+    }
+
+    // 2) لمعالجة السجلات القديمة التي لم تعد موجودة: عيّنها كـ Deleted (لا تمسح)
+    // for (final old in current.folders) {
+    //   if (!foundPaths.containsKey(old.path)) {
+    //     // لو كانت بالفعل success فلا نغيرها (نحتفظ بالتاريخ) — لكن نعلم أنها محذوفة
+    //     final updated = FolderData(
+    //       name: old.name,
+    //       path: old.path,
+    //       Status: old.Status, // نحتفظ بالحالة (Success أو Error)
+    //       StatusMessage: old.StatusMessage + ' | Marked as deleted on scan',
+    //       discoveredAt: old.discoveredAt,
+    //       processedAt: old.processedAt,
+    //       attempts: old.attempts,
+    //       taskId: old.taskId,
+    //       isDeleted: true,
+    //     );
+    //     merged.add(updated);
+    //   }
+    // }
+
+    // 2) معالجة السجلات القديمة التي لم تعد موجودة
+    for (final old in current.folders) {
+      if (!foundPaths.containsKey(old.path)) {
+        // تحقق من أن المجلد غير موجود فعلياً في التخزين
+        final exists = Directory(old.path).existsSync();
+
+        if (!exists) {
+          // المجلد محذوف فعلياً → نعلمه كـ Deleted
+          final updated = FolderData(
+            name: old.name,
+            path: old.path,
+            Status: old.Status, // نحتفظ بالحالة (Success أو Error)
+            StatusMessage: old.StatusMessage + ' | Marked as deleted on scan',
+            discoveredAt: old.discoveredAt,
+            processedAt: old.processedAt,
+            attempts: old.attempts,
+            taskId: old.taskId,
+            isDeleted: true,
+          );
+          merged.add(updated);
+        } else {
+          // موجود فعلياً → لا نعتبره محذوف
+          merged.add(old);
+        }
+      }
+    }
+
+    // 3) احفظ النتيجة (لا تحذف أي عنصر)
+    await _writeFoldersDataAtomic(FoldersData(folders: merged));
   }
 
-  // 2) لمعالجة السجلات القديمة التي لم تعد موجودة: عيّنها كـ Deleted (لا تمسح)
-  for (final old in current.folders) {
-    if (!foundPaths.containsKey(old.path)) {
-      // لو كانت بالفعل success فلا نغيرها (نحتفظ بالتاريخ) — لكن نعلم أنها محذوفة
-      final updated = FolderData(
-        name: old.name,
-        path: old.path,
-        Status: old.Status, // نحتفظ بالحالة (Success أو Error)
-        StatusMessage: old.StatusMessage + ' | Marked as deleted on scan',
-        discoveredAt: old.discoveredAt,
-        processedAt: old.processedAt,
-        attempts: old.attempts,
-        taskId: old.taskId,
-        isDeleted: true,
-      );
-      merged.add(updated);
-    }
-  }
-
-  // 3) احفظ النتيجة (لا تحذف أي عنصر)
-  await _writeFoldersDataAtomic(FoldersData(folders: merged));
-}
   // --- Read / Write flexible
   Future<FoldersData> _readFoldersData() async {
     final f = File(_foldersFilePath!);
@@ -246,36 +299,48 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
     try {
       final decoded = jsonDecode(content);
       if (decoded is Map<String, dynamic>) {
+        // قراءة البيانات فقط، بدون استعادة أي indexes
         if (decoded.containsKey('folders') && decoded['folders'] is List) {
           final list = decoded['folders'] as List<dynamic>;
-          return FoldersData(folders: list.map((e) => FolderData.fromJson(e as Map<String, dynamic>)).toList());
+          return FoldersData(
+            folders: list
+                .map((e) => FolderData.fromJson(e as Map<String, dynamic>))
+                .toList(),
+          );
         }
         // single object -> wrap
         return FoldersData(folders: [FolderData.fromJson(decoded)]);
       }
       if (decoded is List) {
-        return FoldersData(folders: decoded.map((e) => FolderData.fromJson(e as Map<String, dynamic>)).toList());
+        return FoldersData(
+          folders: decoded
+              .map((e) => FolderData.fromJson(e as Map<String, dynamic>))
+              .toList(),
+        );
       }
       return FoldersData(folders: []);
     } catch (e) {
-       Funcs.errors.add('خطأ في قراءة الملف: $e');
+      Funcs.errors.add('خطأ في قراءة الملف: $e');
       // حاول NDJSON قراءة سطر-سطر
-      final lines = content.split(RegExp(r'\r?\n')).map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+      final lines = content
+          .split(RegExp(r'\r?\n'))
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
       final parsed = <FolderData>[];
       for (final line in lines) {
         try {
           final obj = jsonDecode(line);
           if (obj is Map<String, dynamic>) parsed.add(FolderData.fromJson(obj));
         } catch (e) {
-           Funcs.errors.add('خطأ في قراءة الملف: $e');
-           final stop = await Funcs.checkRepeatingErrors();
-      if (stop) {
-        updateUIAfterStopeing();
-      }
-
+          Funcs.errors.add('خطأ في قراءة الملف: $e');
+          final stop = await Funcs.checkRepeatingErrors();
+          if (stop) {
+            updateUIAfterStopeing();
+          }
         }
       }
-       final stop = await Funcs.checkRepeatingErrors();
+      final stop = await Funcs.checkRepeatingErrors();
       if (stop) {
         updateUIAfterStopeing();
       }
@@ -293,16 +358,67 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
       }
       return folder;
     }).toList();
-    final cleanedData = FoldersData(folders: cleanedFolders);
-    await tmp.writeAsString( const JsonEncoder.withIndent('  ').convert(cleanedData.toJson()),);
+    
+    // إضافة metadata للإحصائيات فقط (بدون startIndex لأنه لم يعد مستخدماً)
+    final dataToSave = {
+      'folders': cleanedFolders.map((f) => f.toJson()).toList(),
+      'metadata': {
+        'lastProcessedAt': DateTime.now().toIso8601String(),
+        'totalFolders': cleanedFolders.length,
+        'currentFolderPath': currentFolderPath.value,
+      }
+    };
+    
+    await tmp.writeAsString(
+      const JsonEncoder.withIndent('  ').convert(dataToSave),
+    );
     if (await tmp.exists()) {
-
       if (await f.exists()) {
         try {
           await f.delete();
         } catch (_) {}
       }
       await tmp.rename(f.path);
+    }
+    // تحديث عدد المعلقات بعد الكتابة
+    await _updatePendingCount();
+  }
+
+  // دالة لتحديث عدد المعلقات
+  Future<void> _updatePendingCount() async {
+    try {
+      final data = await _readFoldersData();
+      // إذا كان currentFolderPath موجود، نحسب المعلقات في نفس مسار مجلد الأب فقط
+      if (currentFolderPath.value.isNotEmpty) {
+        final pendingFolders = data.folders
+            .where(
+              (fd) =>
+                  !fd.isDeleted &&
+                  fd.path.startsWith(currentFolderPath.value) &&
+                  fd.path !=
+                      currentFolderPath.value && // استبعاد مجلد الأب نفسه
+                  fd.Status ==
+                      ProcessingStatus.Processing.toString().split('.').last &&
+                  (fd.taskId != null && fd.taskId!.isNotEmpty),
+            )
+            .toList();
+        pendingCount.value = pendingFolders.length;
+      } else {
+        // إذا لم يكن هناك مسار محدد، نحسب جميع المعلقات
+        final pendingFolders = data.folders
+            .where(
+              (fd) =>
+                  fd.Status ==
+                      ProcessingStatus.Processing.toString().split('.').last &&
+                  (fd.taskId != null && fd.taskId!.isNotEmpty) &&
+                  !fd.isDeleted,
+            )
+            .toList();
+        pendingCount.value = pendingFolders.length;
+      }
+    } catch (e) {
+      // في حالة الخطأ، نضع القيمة 0
+      pendingCount.value = 0;
     }
   }
 
@@ -333,7 +449,9 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
       attempts: attempts ?? old.attempts,
       taskId: taskId ?? old.taskId,
       accessToken: shouldRemoveTokens ? null : (accessToken ?? old.accessToken),
-      refreshToken: shouldRemoveTokens ? null : (refreshToken ?? old.refreshToken),
+      refreshToken: shouldRemoveTokens
+          ? null
+          : (refreshToken ?? old.refreshToken),
     );
     final newList = List<FolderData>.from(data.folders);
     newList[idx] = updated;
@@ -341,7 +459,7 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
   }
 
   // --- Main processing logic (two passes)
- /*
+  /*
   Future<void> processFoldersFromFileSequential() async {
     isProcessing.value = true;
     processedCount.value = 0;
@@ -521,87 +639,120 @@ Future<void> scanAndMergeFoldersToFile(Directory parentFolder) async {
   }
 */
 
-void addToQueue(FolderData f) {
-  if (!usedPaths.contains(f.path)) {
-    queue.add(f);
-    usedPaths.add(f.path);
+  void addToQueue(FolderData f) {
+    if (!usedPaths.contains(f.path)) {
+      queue.add(f);
+      usedPaths.add(f.path);
+    }
   }
-}
+
   Future<void> processFoldersFromFileSequential() async {
-  // Reset stop flag at the start of new process
-  Funcs.resetStopRequest();
-  isProcessing.value = true;
-  processedCount.value = 0;
-  successCount.value = 0;
-  failureCount.value = 0;
+    // Reset stop flag at the start of new process
+    Funcs.resetStopRequest();
+    isProcessing.value = true;
+    processedCount.value = 0;
+    successCount.value = 0;
+    failureCount.value = 0;
 
-  const int batchSize = 100; 
-
-  try {
-    // التحقق من وجود أداة ملف في النموذج قبل بدء المعالجة
-    if (Funcs.form_model == null) {
-      isProcessing.value = false;
-      _showSnackBar('لم يتم تحميل النموذج', false);
-      await LogServices.write('[Folder Processing] لم يتم تحميل النموذج');
-      return;
-    }
-
-    final fileControl = Funcs.form_model!.controls.firstWhereOrNull(
-      (c) => c.type == 7,
-    );
-
-    if (fileControl == null) {
-      isProcessing.value = false;
-      _showSnackBar('لا توجد أداة ملف في النموذج', false);
-      await LogServices.write('[Folder Processing] لا توجد أداة ملف في النموذج');
-      return;
-    }
-
-    var data = await _readFoldersData();
-    if (data.folders.isEmpty) {
-      _showSnackBar('لا توجد مجلدات في ملف الفولدرات للمعالجة', false);
-      return;
-    }
-
-    // تجاهل المحذوفة مؤقتًا
-    final all = data.folders.where((f) => !f.isDeleted).toList();
-
-    //  المعلقات
-    for (final f in all.where((f) => f.Status == 'Processing' && (f.taskId != null && f.taskId!.isNotEmpty))) {
-      addToQueue(f);
-    }
-
-    // 2) الجديد
-    for (final f in all.where((f) => f.Status == 'Pending' && (f.attempts == 0))) {
-      addToQueue(f);
-    }
-
-    // 3) الفاشل / إعادة محاولة
-    for (final f in all.where((f) => f.Status != 'Success' && !(f.Status == 'Processing' && f.taskId != null))) {
-      addToQueue(f);
-    }
-    totalCount.value = queue.length;
-    _showSnackBar('بدء المعالجة من ملف: ${queue.length} مجلد...', true);
-
-    while (startIndex < queue.length) {
-      // Check if stop was requested before processing batch
-      if (Funcs.isStopRequested) {
-        updateUIAfterStopeing();
+    try {
+      // التحقق من وجود أداة ملف في النموذج قبل بدء المعالجة
+      if (Funcs.form_model == null) {
+        isProcessing.value = false;
+        _showSnackBar('لم يتم تحميل النموذج', false);
+        await LogServices.write('[Folder Processing] لم يتم تحميل النموذج');
         return;
       }
 
-      final end = (startIndex + batchSize < queue.length) ? startIndex + batchSize : queue.length;
-      final batch = queue.sublist(startIndex, end);
+      final fileControl = Funcs.form_model!.controls.firstWhereOrNull(
+        (c) => c.type == 7,
+      );
 
-      for (final f in batch) {
+      if (fileControl == null) {
+        isProcessing.value = false;
+        _showSnackBar('لا توجد أداة ملف في النموذج', false);
+        await LogServices.write(
+          '[Folder Processing] لا توجد أداة ملف في النموذج',
+        );
+        return;
+      }
+
+      // قراءة البيانات (الـ queue ستُبنى من جديد وتحتوي فقط على المجلدات التي تحتاج معالجة)
+      var data = await _readFoldersData();
+      if (data.folders.isEmpty) {
+        _showSnackBar('لا توجد مجلدات في ملف الفولدرات للمعالجة', false);
+        return;
+      }
+
+      // تحديث عدد المعلقات عند بدء المعالجة
+      await _updatePendingCount();
+
+      // تجاهل المحذوفة مؤقتًا
+      final all = data.folders.where((f) => !f.isDeleted).toList();
+
+      // التحقق من أن currentFolderPath موجود
+      if (currentFolderPath.value.isEmpty) {
+        _showSnackBar('لم يتم تحديد مسار مجلد الأب', false);
+        isProcessing.value = false;
+        return;
+      }
+
+      // فلترة المجلدات التي في نفس مسار مجلد الأب فقط
+      final foldersInParentPath = all
+          .where(
+            (f) =>
+                f.path.startsWith(currentFolderPath.value) &&
+                f.path != currentFolderPath.value, // استبعاد مجلد الأب نفسه
+          )
+          .toList();
+
+      //  المعلقات (في نفس مسار مجلد الأب فقط)
+      for (final f in foldersInParentPath.where(
+        (f) =>
+            f.Status == 'Processing' &&
+            (f.taskId != null && f.taskId!.isNotEmpty),
+      )) {
+        addToQueue(f);
+      }
+
+      // 2) الجديد (في نفس مسار مجلد الأب فقط)
+      for (final f in foldersInParentPath.where(
+        (f) => f.Status == 'Pending' && f.attempts == 0,
+      )) {
+        addToQueue(f);
+      }
+
+      // 3) الفاشل / إعادة محاولة (في نفس مسار مجلد الأب فقط)
+      for (final f in foldersInParentPath.where(
+        (f) =>
+            f.Status != 'Success' &&
+            !(f.Status == 'Processing' && f.taskId != null),
+      )) {
+        addToQueue(f);
+      }
+      totalCount.value = queue.length;
+      
+      // ✅ الحل الصحيح: دائماً نبدأ من الصفر لأن الـ queue تحتوي فقط على المجلدات التي تحتاج معالجة
+      // الـ queue يُعاد بناؤها في كل مرة وتستثني المجلدات الناجحة (Success)
+      startIndex = 0;
+      
+      await LogServices.write(
+        '[Folder Processing] 🚀 بدء المعالجة - عدد المجلدات المتبقية: ${queue.length}',
+      );
+      _showSnackBar('بدء المعالجة: ${queue.length} مجلد...', true);
+
+      // معالجة المجلدات واحداً تلو الآخر - دائماً من البداية
+      for (int i = 0; i < queue.length; i++) {
+        // تحديث startIndex للعرض والإحصائيات فقط
+        startIndex = i;
         // Check if stop was requested before processing each folder
-        // This prevents starting a new folder if stop was requested during previous folder
         if (Funcs.isStopRequested) {
           updateUIAfterStopeing();
-          return; // Exit immediately, don't process this or any remaining folders
+          return;
         }
 
+        final f = queue[i]; // استخدام i بدلاً من startIndex
         final dir = Directory(f.path);
+        
         if (!await dir.exists()) {
           // علم على المجلد كمحذوف بدل مسحه
           final idx = data.folders.indexWhere((d) => d.path == f.path);
@@ -609,30 +760,43 @@ void addToQueue(FolderData f) {
             data.folders[idx] = data.folders[idx].copyWith(
               isDeleted: true,
               Status: 'Error',
-              StatusMessage: 'المجلد غير موجود'
+              StatusMessage: 'المجلد غير موجود',
             );
             await _writeFoldersDataAtomic(FoldersData(folders: data.folders));
           }
           failureCount.value++;
           processedCount.value++;
+          
+          await LogServices.write('[Folder Processing] ⏭️ تم تخطي المجلد ${f.name} (غير موجود) - التقدم: ${i + 1}/${queue.length}');
           continue;
         }
 
-        await _updateFolderStatus(f.path, ProcessingStatus.Processing, 'جاري المعالجة',
-            attempts: f.attempts + 1);
+        await _updateFolderStatus(
+          f.path,
+          ProcessingStatus.Processing,
+          'جاري المعالجة',
+          attempts: f.attempts + 1,
+        );
 
         final result = await _processSingleSubfolderWrapped(dir);
 
         // Check if stop was requested - either by flag or by result message
-        if (Funcs.isStopRequested || result.errorMessage == 'تم إيقاف المعالجة حسب الطلب') {
+        if (Funcs.isStopRequested ||
+            result.errorMessage == 'تم إيقاف المعالجة حسب الطلب') {
           updateUIAfterStopeing();
           return;
         }
 
         if (result.status == ProcessingStatus.Success) {
-          await _updateFolderStatus(f.path, ProcessingStatus.Success, 'تم الإرسال', processedAt: DateTime.now());
+          await _updateFolderStatus(
+            f.path,
+            ProcessingStatus.Success,
+            'تم الإرسال',
+            processedAt: DateTime.now(),
+          );
           successCount.value++;
-        } else if (result.status == ProcessingStatus.Processing || result.status == ProcessingStatus.Pending) {
+        } else if (result.status == ProcessingStatus.Processing ||
+            result.status == ProcessingStatus.Pending) {
           // معالجتها مثل المعلقات القديمة بالضبط
           await _updateFolderStatus(
             f.path,
@@ -644,112 +808,127 @@ void addToQueue(FolderData f) {
             refreshToken: result.refreshToken,
           );
         } else {
-          await _updateFolderStatus(f.path, ProcessingStatus.Error, result.errorMessage ?? 'خطأ غير معروف',
-              processedAt: DateTime.now());
+          await _updateFolderStatus(
+            f.path,
+            ProcessingStatus.Error,
+            result.errorMessage ?? 'خطأ غير معروف',
+            processedAt: DateTime.now(),
+          );
           failureCount.value++;
         }
 
         processedCount.value++;
-       await LogServices.write('[Folder Processing] تمت معالجه المجلد الابن ${f.name}');
+        
+        await LogServices.write(
+          '[Folder Processing] ✅ تمت معالجة المجلد ${f.name} - التقدم: ${i + 1}/${queue.length}',
+        );
 
         await Future.delayed(const Duration(seconds: 1));
+      } // نهاية for loop
+
+      // --- بعد المعالجة: إعادة فحص المعلقات والفاشلين مثل السابق تمامًا
+      // Only retry if stop was not requested
+      if (!Funcs.isStopRequested) {
+        await LogServices.write('[Folder Processing] بداء معالجة الملعقات ');
+        await _retryPendingFolders();
       }
 
-      // Check before moving to next batch
-      if (Funcs.isStopRequested) {
+      // Only show completion message if not stopped
+      if (!Funcs.isStopRequested) {
+        await LogServices.write(
+          '[Folder Processing] 🎉 اكتملت المعالجة - نجح: ${successCount.value}, فشل: ${failureCount.value}',
+        );
+        
+        _showSnackBar(
+          'اكتملت المعالجة: ${successCount.value} نجح، ${failureCount.value} فشل',
+          successCount.value > 0,
+        );
+        await _showResultsDialog();
+      }
+    } catch (e, st) {
+      Funcs.errors.add('خطأ في المعالجة: $e');
+      _showSnackBar('خطأ في المعالجة: $e', false);
+      print(st);
+      final stop = await Funcs.checkRepeatingErrors();
+      if (stop) {
         updateUIAfterStopeing();
-        return;
+        return; // Exit early when stop is requested
       }
-
-      startIndex += batchSize;
-      await Future.delayed(const Duration(seconds: 1)); // فاصل لتخفيف الضغط
-    }
-
-    // --- بعد المعالجة: إعادة فحص المعلقات والفاشلين مثل السابق تمامًا
-    // Only retry if stop was not requested
-    if (!Funcs.isStopRequested) {
-      await LogServices.write('[Folder Processing] بداء معالجة الملعقات ');
-      await _retryPendingFolders();
-    }
-
-    // Only show completion message if not stopped
-    if (!Funcs.isStopRequested) {
-      _showSnackBar('اكتملت المعالجة: ${successCount.value} نجح، ${failureCount.value} فشل', successCount.value > 0);
-      Get.defaultDialog(
-       actions: [
-        ElevatedButton(onPressed: (){Get.back();}, child: Text('موافق'))
-       ],
-       title: 'النتجية',
-       middleText: 'العمليات الناجحه:${successCount}\ العمليات الفاشله: ${failureCount}\n',
-
-      );
-    }
-
-  } catch (e, st) {
-    Funcs.errors.add('خطأ في المعالجة: $e');
-    _showSnackBar('خطأ في المعالجة: $e', false);
-    print(st);
-    final stop = await Funcs.checkRepeatingErrors();
-    if (stop) {
-      updateUIAfterStopeing();
-      return; // Exit early when stop is requested
-    }
-  } finally {
-    // Only clear errors and reset processing state if not stopped
-    if (!Funcs.isStopRequested) {
-      Funcs.errors.clear();
-      isProcessing.value = false;
+    } finally {
+      // Only clear errors and reset processing state if not stopped
+      if (!Funcs.isStopRequested) {
+        Funcs.errors.clear();
+        isProcessing.value = false;
+      }
+      processedCount.value = 0;
+      successCount.value = 0;
+      failureCount.value = 0;
+      pendingCount.value = 0;
+      totalCount.value = 0;
+      tasks.clear();
+      queue.clear();
+      usedPaths.clear();
+      _formController?.clearFormData();
     }
   }
-}
 
-  
   // --- Wrapped single folder processing
   Future<ProcessingResult> _processSingleSubfolderWrapped(
     Directory subfolder,
   ) async {
-
     final folderName = subfolder.path.split(Platform.pathSeparator).last;
     //This Comment is so Important do not remove it
-    // Step 1: Parse folder name
+    await LogServices.write('[Folder Processing]✅ Step 1 ');
     await LogServices.write('[Folder Processing] بداء فصل الاسم ');
-    
-    final parsed = _parserService.parseFolderName(folderName,department: department.value);
+
+    final parsed = _parserService.parseFolderName(
+      folderName,
+      department: department.value,
+    );
     // final parsed = folderName;
     print('parsed: $parsed');
     if (parsed == null) {
-    // Parsing failed - invalid pattern
-    await _saveFailure(Record( originalName: folderName, parsedName: null, errorMessage: 'اسم المجلد لا يتطابق مع النمط المطلوب', timestamp: DateTime.now(), folderPath: subfolder.path, ));
-    await LogServices.write('[Folder Processing]فشل في فصل اسم المجلد');
-    // Add error first
-    Funcs.errors.add('اسم المجلد لا يتطابق مع النمط المطلوب: $folderName');
-    
-    // Check for repeating errors BEFORE showing snackbar
-    final stop = await Funcs.checkRepeatingErrors();
-    if (stop) {
-      // Stop was requested - don't show snackbar, don't process further
-      // Just return with stop status so main loop can break immediately
+      // Parsing failed - invalid pattern
+      await _saveFailure(
+        Record(
+          originalName: folderName,
+          parsedName: null,
+          errorMessage: 'اسم المجلد لا يتطابق مع النمط المطلوب',
+          timestamp: DateTime.now(),
+          folderPath: subfolder.path,
+        ),
+      );
+      await LogServices.write('[Folder Processing]فشل في فصل اسم المجلد');
+      // Add error first
+      Funcs.errors.add('اسم المجلد لا يتطابق مع النمط المطلوب: $folderName');
+
+      // Check for repeating errors BEFORE showing snackbar
+      final stop = await Funcs.checkRepeatingErrors();
+      if (stop) {
+        // Stop was requested - don't show snackbar, don't process further
+        // Just return with stop status so main loop can break immediately
+        return ProcessingResult(
+          ProcessingStatus.Error,
+          errorMessage: 'تم إيقاف المعالجة حسب الطلب',
+        );
+      }
+
+      // Only show snackbar if stop was NOT requested
+      if (!Funcs.isStopRequested) {
+        _showSnackBar('⚠️ نمط غير صحيح: $folderName', false);
+      }
+      failureCount.value++;
+      // Wait 1 second before moving to next folder
+      await Future.delayed(const Duration(seconds: 2));
       return ProcessingResult(
         ProcessingStatus.Error,
-        errorMessage: 'تم إيقاف المعالجة حسب الطلب',
+        errorMessage: 'اسم المجلد لا يتطابق مع النمط المطلوب',
       );
-      
     }
-    
-    // Only show snackbar if stop was NOT requested
-    if (!Funcs.isStopRequested) {
-      _showSnackBar('⚠️ نمط غير صحيح: $folderName', false);
-    }
-    failureCount.value++;
-    // Wait 1 second before moving to next folder 
-    await Future.delayed(const Duration(seconds: 1));
-    return ProcessingResult(
-          ProcessingStatus.Error,
-          errorMessage: 'اسم المجلد لا يتطابق مع النمط المطلوب',
-        );
-    
-    }
-    await LogServices.write('[Folder Processing]  تم فصل الاسم بنجاح بداء المعالجة');
+    await LogServices.write(
+      '[Folder Processing]  تم فصل الاسم بنجاح بداء المعالجة',
+    );
+    await LogServices.write('[Folder Processing]✅ Step 2 ');
     try {
       final connectedControl = Funcs.form_model?.controls.firstWhereOrNull(
         (c) => c.type == 16,
@@ -763,13 +942,15 @@ void addToQueue(FolderData f) {
 
       // Check if stop was requested before starting API calls
       if (Funcs.isStopRequested) {
-        await LogServices.write('[Folder Processing] تم ايقاف المعالجة حسب الطلب');
+        await LogServices.write(
+          '[Folder Processing] تم ايقاف المعالجة حسب الطلب',
+        );
         return ProcessingResult(
           ProcessingStatus.Error,
           errorMessage: 'تم إيقاف المعالجة حسب الطلب',
         );
       }
-          
+
       final response = await _apiClient.getFirstMatch(
         formId: Funcs.form_id!,
         controlId: connectedControl.id,
@@ -778,18 +959,21 @@ void addToQueue(FolderData f) {
 
       // Check again after API call
       if (Funcs.isStopRequested) {
-        await LogServices.write('[Folder Processing] تم ايقاف المعالجة حسب الطلب');
+        await LogServices.write(
+          '[Folder Processing] تم ايقاف المعالجة حسب الطلب',
+        );
         return ProcessingResult(
           ProcessingStatus.Error,
           errorMessage: 'تم إيقاف المعالجة حسب الطلب',
         );
       }
-      await LogServices.write('[Folder Processing]Get First Match response: $response');
-       print('response received');
+      // await LogServices.write('[Folder Processing]Get First Match response: $response');
+      print('response received');
       final valueMap = _asValueMap(response['value']);
       if (valueMap == null || valueMap.isEmpty) {
-        
-        await LogServices.write('[Folder Processing] لا توجد بيانات مطابقة للمجلد');
+        await LogServices.write(
+          '[Folder Processing] لا توجد بيانات مطابقة للمجلد',
+        );
         return ProcessingResult(
           ProcessingStatus.Empty,
           errorMessage: 'لا توجد بيانات مطابقة للمجلد',
@@ -824,7 +1008,8 @@ void addToQueue(FolderData f) {
             errorMessage: 'تم إيقاف المعالجة حسب الطلب',
           );
         }
-        await LogServices.write('[Folder Processing] بداء بناء payload ${jsonEncode(valueMap)}');
+        await LogServices.write('[Folder Processing]✅ Step 3 ');
+        // await LogServices.write('[Folder Processing] بداء بناء payload ${jsonEncode(valueMap)}');
         final payload = await _formController?.buildSubmitPayload();
         if (payload == null) {
           await LogServices.write('[Folder Processing] فشل بناء payload');
@@ -847,12 +1032,13 @@ void addToQueue(FolderData f) {
         }
 
         final uploadFolderName = payload['foldername'] ?? 'unknown';
-        final sanitizedPayload = Funcs.sanitizeResponse(jsonEncode(payload));
-        print('payload: $sanitizedPayload');
-        await LogServices.write('[Folder Processing] submitForm payload: $sanitizedPayload');
+        // final sanitizedPayload = Funcs.sanitizeResponse(jsonEncode(payload));
+        // print('payload: $sanitizedPayload');
+        // await LogServices.write('[Folder Processing] submitForm payload: $sanitizedPayload');
+        await LogServices.write('[Folder Processing]✅ Step 4 ');
         final submitResponse = await _apiClient.submitForm(payload);
-        final sanitizedResponse = Funcs.sanitizeResponse(jsonEncode(submitResponse));
-        print('submitResponse: $sanitizedResponse');
+        // final sanitizedResponse = Funcs.sanitizeResponse(jsonEncode(submitResponse));
+        // print('submitResponse: $sanitizedResponse');
 
         // Check after submitting
         if (Funcs.isStopRequested) {
@@ -863,12 +1049,16 @@ void addToQueue(FolderData f) {
           );
         }
         final uploadedCount = _countUploadedFiles(payload['controls']);
-
-        final initial = await SubmissionService.checkSubmissionStatus(submitResponse);
+        await LogServices.write('[Folder Processing]✅ Step 5 ');
+        final initial = await SubmissionService.checkSubmissionStatus(
+          submitResponse,
+        );
 
         if (initial.status == SubmissionStatus.success) {
           final applyId = initial.applyId!;
-          await LogServices.write('[Folder Processing] تم الرفع والإرسال بنجاح للمجلد ${folderName}');
+          await LogServices.write(
+            '[Folder Processing] تم الرفع والإرسال بنجاح للمجلد ${folderName}',
+          );
           await _saveSuccess(
             Record(
               originalName: folderName,
@@ -879,12 +1069,16 @@ void addToQueue(FolderData f) {
               folderPath: subfolder.path,
             ),
           );
+          // تنظيف بيانات النموذج بعد نجاح الإرسال
+          _formController?.clearFormData();
           return ProcessingResult(ProcessingStatus.Success, applyId: applyId);
         }
 
         if (initial.status == SubmissionStatus.pending) {
           // حساب حجم المجلد لتحديد مهلة السماح المناسبة
-          await LogServices.write('[Folder Processing] قيد الانتظار للمجلد ${folderName}');
+          await LogServices.write(
+            '[Folder Processing] قيد الانتظار للمجلد ${folderName}',
+          );
           final folderBytes = await _directorySize(subfolder);
           final cfg = pollConfigForSizeBytes(folderBytes);
 
@@ -944,6 +1138,8 @@ void addToQueue(FolderData f) {
                 'تم الإرسال',
                 processedAt: DateTime.now(),
               );
+              // تنظيف بيانات النموذج بعد نجاح الإرسال
+              _formController?.clearFormData();
               return ProcessingResult(
                 ProcessingStatus.Success,
                 applyId: applyId,
@@ -970,7 +1166,9 @@ void addToQueue(FolderData f) {
             );
           } catch (e) {
             // خطأ خلال الاستعلام — سجّله كفشل موقّت
-            await LogServices.write('[Folder Processing] خطأ أثناء نافذة السماح: $e');
+            await LogServices.write(
+              '[Folder Processing] خطأ أثناء نافذة السماح: $e',
+            );
             Funcs.errors.add('خطأ أثناء نافذة السماح: $e');
             await _saveFailure(
               Record(
@@ -1010,7 +1208,9 @@ void addToQueue(FolderData f) {
           errorMessage: initial.errorMessage ?? 'فشل الإرسال',
         );
       } catch (apiError) {
-        await LogServices.write('[Folder Processing] خطأ في الإرسال: $apiError');
+        await LogServices.write(
+          '[Folder Processing] خطأ في الإرسال: $apiError',
+        );
         Funcs.errors.add('خطأ في الإرسال: $apiError');
         await _saveFailure(
           Record(
@@ -1034,6 +1234,7 @@ void addToQueue(FolderData f) {
           errorMessage: apiError.toString(),
         );
       } finally {
+        // await LogServices.write('[Folder Processing]✅ Folder Processing Finally ');
         _hidePersistentSnack();
         await _closePreviewDialogIfAny();
       }
@@ -1062,6 +1263,7 @@ void addToQueue(FolderData f) {
         errorMessage: searchError.toString(),
       );
     } finally {
+      await LogServices.write('[Folder Processing]✅ Folder Processing Ended ');
       await Future.delayed(const Duration(seconds: 2));
       await _closePreviewDialogIfAny();
     }
@@ -1072,9 +1274,9 @@ void addToQueue(FolderData f) {
     try {
       await _recordStore?.saveFailure(record);
     } catch (e) {
-       Funcs.errors.add('خطأ في حفظ الفشل: $e');
+      Funcs.errors.add('خطأ في حفظ الفشل: $e');
       print('Error saving failure: $e');
-       final stop = await Funcs.checkRepeatingErrors();
+      final stop = await Funcs.checkRepeatingErrors();
       if (stop) {
         updateUIAfterStopeing();
       }
@@ -1085,21 +1287,1287 @@ void addToQueue(FolderData f) {
     try {
       await _recordStore?.saveSuccess(record);
     } catch (e) {
-       Funcs.errors.add('خطأ في حفظ النجاح: $e');
+      Funcs.errors.add('خطأ في حفظ النجاح: $e');
       print('Error saving success: $e');
-       final stop = await Funcs.checkRepeatingErrors();
+      final stop = await Funcs.checkRepeatingErrors();
       if (stop) {
         updateUIAfterStopeing();
       }
     }
   }
 
+  // --- Read JSON files
+  Future<SuccessData?> _readSuccessesData() async {
+    try {
+      if (_successFilePath == null) return null;
+      final file = File(_successFilePath!);
+      if (!await file.exists()) return SuccessData(successes: []);
+      final content = await file.readAsString();
+      if (content.trim().isEmpty) return SuccessData(successes: []);
+      final json = jsonDecode(content);
+      return SuccessData.fromJson(json as Map<String, dynamic>);
+    } catch (e) {
+      print('Error reading successes file: $e');
+      return SuccessData(successes: []);
+    }
+  }
+
+  Future<FailuresData?> _readFailuresData() async {
+    try {
+      if (_failuresFilePath == null) return null;
+      final file = File(_failuresFilePath!);
+      if (!await file.exists()) return FailuresData(failures: []);
+      final content = await file.readAsString();
+      if (content.trim().isEmpty) return FailuresData(failures: []);
+      final json = jsonDecode(content);
+      return FailuresData.fromJson(json as Map<String, dynamic>);
+    } catch (e) {
+      print('Error reading failures file: $e');
+      return FailuresData(failures: []);
+    }
+  }
+
+  // --- Sanitize error message (remove tokens)
+  String _sanitizeErrorMessage(String errorMessage) {
+    // Remove access token patterns
+    String sanitized = errorMessage.replaceAll(
+      RegExp(
+        r'access[_\s]*token[=:]\s*[a-zA-Z0-9\-_\.]+',
+        caseSensitive: false,
+      ),
+      'access_token: مخفى',
+    );
+    // Remove refresh token patterns
+    sanitized = sanitized.replaceAll(
+      RegExp(
+        r'refresh[_\s]*token[=:]\s*[a-zA-Z0-9\-_\.]+',
+        caseSensitive: false,
+      ),
+      'refresh_token: مخفى',
+    );
+    // Remove any remaining token-like strings in JSON (long tokens)
+    sanitized = sanitized.replaceAll(
+      RegExp(
+        r'(?:access|refresh)[_\s]*token[=:]\s*[a-zA-Z0-9\-_\.]{20,}',
+        caseSensitive: false,
+      ),
+      'مخفى',
+    );
+    return sanitized;
+  }
+
+  // --- Helper: Extract parent folder path from full path
+  String _getParentPath(String folderPath) {
+    try {
+      return p.dirname(folderPath);
+    } catch (e) {
+      // Fallback: try to extract manually
+      final parts = folderPath.split(Platform.pathSeparator);
+      if (parts.length > 1) {
+        return parts.sublist(0, parts.length - 1).join(Platform.pathSeparator);
+      }
+      return folderPath;
+    }
+  }
+/*
+  // --- Show results dialog with tabs grouped by parent folder
+  Future<void> _showResultsDialog() async {
+    final successesData = await _readSuccessesData();
+    final failuresData = await _readFailuresData();
+
+    final successes = successesData?.successes ?? [];
+    final failures = failuresData?.failures ?? [];
+
+    // Group successes by parent folder
+    final successesByParent = <String, List<Record>>{};
+    for (final success in successes) {
+      final parentPath = _getParentPath(success.folderPath);
+      successesByParent.putIfAbsent(parentPath, () => []).add(success);
+    }
+
+    // Group failures by parent folder
+    final failuresByParent = <String, List<Record>>{};
+    for (final failure in failures) {
+      final parentPath = _getParentPath(failure.folderPath);
+      failuresByParent.putIfAbsent(parentPath, () => []).add(failure);
+    }
+
+    final successCount = successes.length;
+    final failureCount = failures.length;
+
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Container(
+          width: Get.width * 0.9,
+          height: Get.height * 0.7,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              // Title
+              Text(
+                'النتائج',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              // Tab Bar
+              DefaultTabController(
+                length: 2,
+                child: Expanded(
+                  child: Column(
+                    children: [
+                      TabBar(
+                        tabs: [
+                          Tab(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text('الناجحه'),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    '$successCount',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Tab(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text('الفاشله'),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    '$failureCount',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      // Tab Views
+                      Expanded(
+                        child: TabBarView(
+                          children: [
+                            // Success Tab - Grouped by parent folder
+                            successes.isEmpty
+                                ? Center(
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.check_circle_outline,
+                                          size: 64,
+                                          color: Colors.grey,
+                                        ),
+                                        const SizedBox(height: 16),
+                                        Text(
+                                          'لا توجد عمليات ناجحة',
+                                          style: TextStyle(
+                                            fontSize: 18,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                : ListView.builder(
+                                    itemCount: successesByParent.length,
+                                    itemBuilder: (context, index) {
+                                      final parentPath = successesByParent.keys
+                                          .elementAt(index);
+                                      final parentSuccesses =
+                                          successesByParent[parentPath]!;
+                                      final parentName = p.basename(parentPath);
+
+                                      return Card(
+                                        margin: const EdgeInsets.symmetric(
+                                          vertical: 8,
+                                          horizontal: 4,
+                                        ),
+                                        child: ExpansionTile(
+                                          leading: Icon(
+                                            Icons.folder,
+                                            color: Colors.blue,
+                                          ),
+                                          title: Text(
+                                            parentName,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                          subtitle: Text(
+                                            'عدد الناجحة: ${parentSuccesses.length}',
+                                            style: TextStyle(
+                                              color: Colors.green[700],
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                          children: [
+                                            Padding(
+                                              padding: const EdgeInsets.all(
+                                                8.0,
+                                              ),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 8.0,
+                                                        ),
+                                                    child: Text(
+                                                      'المسار: $parentPath',
+                                                      style: TextStyle(
+                                                        fontSize: 11,
+                                                        color: Colors.grey[600],
+                                                        fontStyle:
+                                                            FontStyle.italic,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 8),
+                                                  ...parentSuccesses.map(
+                                                    (success) => Container(
+                                                      margin:
+                                                          const EdgeInsets.symmetric(
+                                                            vertical: 4,
+                                                          ),
+                                                      padding:
+                                                          const EdgeInsets.all(
+                                                            8,
+                                                          ),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.green[50],
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              8,
+                                                            ),
+                                                        border: Border.all(
+                                                          color: Colors
+                                                              .green[200]!,
+                                                        ),
+                                                      ),
+                                                      child: Row(
+                                                        children: [
+                                                          Icon(
+                                                            Icons.check_circle,
+                                                            size: 16,
+                                                            color: Colors.green,
+                                                          ),
+                                                          const SizedBox(
+                                                            width: 8,
+                                                          ),
+                                                          Expanded(
+                                                            child: Column(
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .start,
+                                                              children: [
+                                                                Text(
+                                                                  success
+                                                                      .originalName,
+                                                                  style: TextStyle(
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .bold,
+                                                                    fontSize:
+                                                                        13,
+                                                                  ),
+                                                                ),
+                                                                if (success
+                                                                        .parsedName !=
+                                                                    null)
+                                                                  Text(
+                                                                    'المحول: ${success.parsedName}',
+                                                                    style: TextStyle(
+                                                                      fontSize:
+                                                                          12,
+                                                                      color: Colors
+                                                                          .green[700],
+                                                                    ),
+                                                                  ),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+                            // Failures Tab - Grouped by parent folder
+                            failures.isEmpty
+                                ? Center(
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.check_circle_outline,
+                                          size: 64,
+                                          color: Colors.grey,
+                                        ),
+                                        const SizedBox(height: 16),
+                                        Text(
+                                          'لا توجد عمليات فاشلة',
+                                          style: TextStyle(
+                                            fontSize: 18,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                : ListView.builder(
+                                    itemCount: failuresByParent.length,
+                                    itemBuilder: (context, index) {
+                                      final parentPath = failuresByParent.keys
+                                          .elementAt(index);
+                                      final parentFailures =
+                                          failuresByParent[parentPath]!;
+                                      final parentName = p.basename(parentPath);
+
+                                      return Card(
+                                        margin: const EdgeInsets.symmetric(
+                                          vertical: 8,
+                                          horizontal: 4,
+                                        ),
+                                        child: ExpansionTile(
+                                          leading: Icon(
+                                            Icons.folder,
+                                            color: Colors.red,
+                                          ),
+                                          title: Text(
+                                            parentName,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                          subtitle: Text(
+                                            'عدد الفاشلة: ${parentFailures.length}',
+                                            style: TextStyle(
+                                              color: Colors.red[700],
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                          children: [
+                                            Padding(
+                                              padding: const EdgeInsets.all(
+                                                8.0,
+                                              ),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 8.0,
+                                                        ),
+                                                    child: Text(
+                                                      'المسار: $parentPath',
+                                                      style: TextStyle(
+                                                        fontSize: 11,
+                                                        color: Colors.grey[600],
+                                                        fontStyle:
+                                                            FontStyle.italic,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 8),
+                                                  ...parentFailures.map((
+                                                    failure,
+                                                  ) {
+                                                    final sanitizedError =
+                                                        _sanitizeErrorMessage(
+                                                          failure.errorMessage,
+                                                        );
+                                                    final isLongError =
+                                                        sanitizedError.length >
+                                                        100;
+
+                                                    return Container(
+                                                      margin:
+                                                          const EdgeInsets.symmetric(
+                                                            vertical: 4,
+                                                          ),
+                                                      padding:
+                                                          const EdgeInsets.all(
+                                                            8,
+                                                          ),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.red[50],
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              8,
+                                                            ),
+                                                        border: Border.all(
+                                                          color:
+                                                              Colors.red[200]!,
+                                                        ),
+                                                      ),
+                                                      child: Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .start,
+                                                        children: [
+                                                          // Original Name
+                                                          Row(
+                                                            children: [
+                                                              Icon(
+                                                                Icons.folder,
+                                                                size: 16,
+                                                                color:
+                                                                    Colors.blue,
+                                                              ),
+                                                              const SizedBox(
+                                                                width: 4,
+                                                              ),
+                                                              Expanded(
+                                                                child: Text(
+                                                                  'الاسم الأصلي: ${failure.originalName}',
+                                                                  style: TextStyle(
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .bold,
+                                                                    fontSize:
+                                                                        13,
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                          if (failure
+                                                                  .parsedName !=
+                                                              null) ...[
+                                                            const SizedBox(
+                                                              height: 4,
+                                                            ),
+                                                            Row(
+                                                              children: [
+                                                                Icon(
+                                                                  Icons.edit,
+                                                                  size: 16,
+                                                                  color: Colors
+                                                                      .orange,
+                                                                ),
+                                                                const SizedBox(
+                                                                  width: 4,
+                                                                ),
+                                                                Expanded(
+                                                                  child: Text(
+                                                                    'الاسم المحول: ${failure.parsedName}',
+                                                                    style: TextStyle(
+                                                                      fontSize:
+                                                                          12,
+                                                                      color: Colors
+                                                                          .orange[700],
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ],
+                                                          const SizedBox(
+                                                            height: 4,
+                                                          ),
+                                                          // Error Message
+                                                          Row(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              Icon(
+                                                                Icons
+                                                                    .error_outline,
+                                                                size: 16,
+                                                                color:
+                                                                    Colors.red,
+                                                              ),
+                                                              const SizedBox(
+                                                                width: 4,
+                                                              ),
+                                                              Expanded(
+                                                                child: GestureDetector(
+                                                                  onTap:
+                                                                      isLongError
+                                                                      ? () {
+                                                                          Get.dialog(
+                                                                            Dialog(
+                                                                              child: Container(
+                                                                                width:
+                                                                                    Get.width *
+                                                                                    0.8,
+                                                                                padding: const EdgeInsets.all(
+                                                                                  16,
+                                                                                ),
+                                                                                child: Column(
+                                                                                  mainAxisSize: MainAxisSize.min,
+                                                                                  children: [
+                                                                                    Text(
+                                                                                      'تفاصيل الخطأ',
+                                                                                      style: TextStyle(
+                                                                                        fontSize: 18,
+                                                                                        fontWeight: FontWeight.bold,
+                                                                                      ),
+                                                                                    ),
+                                                                                    const SizedBox(
+                                                                                      height: 16,
+                                                                                    ),
+                                                                                    Expanded(
+                                                                                      child: SingleChildScrollView(
+                                                                                        child: SelectableText(
+                                                                                          sanitizedError,
+                                                                                          style: TextStyle(
+                                                                                            fontSize: 14,
+                                                                                          ),
+                                                                                        ),
+                                                                                      ),
+                                                                                    ),
+                                                                                    const SizedBox(
+                                                                                      height: 16,
+                                                                                    ),
+                                                                                    ElevatedButton(
+                                                                                      onPressed: () => Get.back(),
+                                                                                      child: Text(
+                                                                                        'إغلاق',
+                                                                                      ),
+                                                                                    ),
+                                                                                  ],
+                                                                                ),
+                                                                              ),
+                                                                            ),
+                                                                          );
+                                                                        }
+                                                                      : null,
+                                                                  child: Text(
+                                                                    sanitizedError,
+                                                                    style: TextStyle(
+                                                                      fontSize:
+                                                                          12,
+                                                                      color: Colors
+                                                                          .red[700],
+                                                                    ),
+                                                                    maxLines:
+                                                                        isLongError
+                                                                        ? 2
+                                                                        : null,
+                                                                    overflow:
+                                                                        isLongError
+                                                                        ? TextOverflow
+                                                                              .ellipsis
+                                                                        : null,
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                          if (isLongError)
+                                                            Padding(
+                                                              padding:
+                                                                  const EdgeInsets.only(
+                                                                    top: 4,
+                                                                  ),
+                                                              child: Text(
+                                                                'انقر لعرض التفاصيل الكاملة',
+                                                                style: TextStyle(
+                                                                  fontSize: 10,
+                                                                  color: Colors
+                                                                      .blue,
+                                                                  fontStyle:
+                                                                      FontStyle
+                                                                          .italic,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                        ],
+                                                      ),
+                                                    );
+                                                  }),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Close Button
+              ElevatedButton(
+                onPressed: () => Get.back(),
+                child: Text('موافق'),
+                style: ElevatedButton.styleFrom(
+                  minimumSize: Size(Get.width * 0.5, 40),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      barrierDismissible: true,
+    );
+  }
+*/
+  // --- Show results dialog with tabs grouped by parent folder
+  Future<void> _showResultsDialog() async {
+    // التحقق من وجود مسار المجلد الأب
+    if (currentFolderPath.value.isEmpty) {
+      _showSnackBar('لم يتم تحديد مسار مجلد الأب', false);
+      return;
+    }
+
+    final successesData = await _readSuccessesData();
+    final failuresData = await _readFailuresData();
+
+    // تصفية النتائج حسب مسار المجلد الأب الحالي فقط
+    final allSuccesses = successesData?.successes ?? [];
+    final allFailures = failuresData?.failures ?? [];
+    
+    final successes = allSuccesses.where((record) => 
+      record.folderPath.startsWith(currentFolderPath.value) &&
+      record.folderPath != currentFolderPath.value // استبعاد مجلد الأب نفسه
+    ).toList();
+    
+    final failures = allFailures.where((record) => 
+      record.folderPath.startsWith(currentFolderPath.value) &&
+      record.folderPath != currentFolderPath.value // استبعاد مجلد الأب نفسه
+    ).toList();
+
+    // Group successes by parent folder
+    final successesByParent = <String, List<Record>>{};
+    for (final success in successes) {
+      final parentPath = _getParentPath(success.folderPath);
+      successesByParent.putIfAbsent(parentPath, () => []).add(success);
+    }
+
+    // Group failures by parent folder
+    final failuresByParent = <String, List<Record>>{};
+    for (final failure in failures) {
+      final parentPath = _getParentPath(failure.folderPath);
+      failuresByParent.putIfAbsent(parentPath, () => []).add(failure);
+    }
+
+    final successCount = successes.length;
+    final failureCount = failures.length;
+
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Container(
+          width: Get.width * 0.9,
+          height: Get.height * 0.7,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              // Title
+              Text(
+                'النتائج',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              // Tab Bar
+              DefaultTabController(
+                length: 2,
+                child: Expanded(
+                  child: Column(
+                    children: [
+                      TabBar(
+                        tabs: [
+                          Tab(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text('الناجحه'),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    '$successCount',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Tab(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text('الفاشله'),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    '$failureCount',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      // Tab Views
+                      Expanded(
+                        child: TabBarView(
+                          children: [
+                            // Success Tab - Grouped by parent folder
+                            successes.isEmpty
+                                ? Center(
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.check_circle_outline,
+                                          size: 64,
+                                          color: Colors.grey,
+                                        ),
+                                        const SizedBox(height: 16),
+                                        Text(
+                                          'لا توجد عمليات ناجحة',
+                                          style: TextStyle(
+                                            fontSize: 18,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                : ListView.builder(
+                                    itemCount: successesByParent.length,
+                                    itemBuilder: (context, index) {
+                                      final parentPath = successesByParent.keys
+                                          .elementAt(index);
+                                      final parentSuccesses =
+                                          successesByParent[parentPath]!;
+                                      final parentName = p.basename(parentPath);
+
+                                      return Card(
+                                        margin: const EdgeInsets.symmetric(
+                                          vertical: 8,
+                                          horizontal: 4,
+                                        ),
+                                        child: ExpansionTile(
+                                          leading: Icon(
+                                            Icons.folder,
+                                            color: Colors.blue,
+                                          ),
+                                          title: Text(
+                                            parentName,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                          subtitle: Text(
+                                            'عدد الناجحة: ${parentSuccesses.length}',
+                                            style: TextStyle(
+                                              color: Colors.green[700],
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                          children: [
+                                            Padding(
+                                              padding: const EdgeInsets.all(
+                                                8.0,
+                                              ),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 8.0,
+                                                        ),
+                                                    child: Text(
+                                                      'المسار: $parentPath',
+                                                      style: TextStyle(
+                                                        fontSize: 11,
+                                                        color: Colors.grey[600],
+                                                        fontStyle:
+                                                            FontStyle.italic,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 8),
+                                                  ...parentSuccesses.map(
+                                                    (success) => Container(
+                                                      margin:
+                                                          const EdgeInsets.symmetric(
+                                                            vertical: 4,
+                                                          ),
+                                                      padding:
+                                                          const EdgeInsets.all(
+                                                            8,
+                                                          ),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.green[50],
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              8,
+                                                            ),
+                                                        border: Border.all(
+                                                          color: Colors
+                                                              .green[200]!,
+                                                        ),
+                                                      ),
+                                                      child: Row(
+                                                        children: [
+                                                          Icon(
+                                                            Icons.check_circle,
+                                                            size: 16,
+                                                            color: Colors.green,
+                                                          ),
+                                                          const SizedBox(
+                                                            width: 8,
+                                                          ),
+                                                          Expanded(
+                                                            child: Column(
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .start,
+                                                              children: [
+                                                                Text(
+                                                                  success
+                                                                      .originalName,
+                                                                  style: TextStyle(
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .bold,
+                                                                    fontSize:
+                                                                        13,
+                                                                  ),
+                                                                ),
+                                                                if (success
+                                                                        .parsedName !=
+                                                                    null)
+                                                                  Text(
+                                                                    'المحول: ${success.parsedName}',
+                                                                    style: TextStyle(
+                                                                      fontSize:
+                                                                          12,
+                                                                      color: Colors
+                                                                          .green[700],
+                                                                    ),
+                                                                  ),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+                            // Failures Tab - Grouped by parent folder
+                            failures.isEmpty
+                                ? Center(
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.check_circle_outline,
+                                          size: 64,
+                                          color: Colors.grey,
+                                        ),
+                                        const SizedBox(height: 16),
+                                        Text(
+                                          'لا توجد عمليات فاشلة',
+                                          style: TextStyle(
+                                            fontSize: 18,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                : ListView.builder(
+                                    itemCount: failuresByParent.length,
+                                    itemBuilder: (context, index) {
+                                      final parentPath = failuresByParent.keys
+                                          .elementAt(index);
+                                      final parentFailures =
+                                          failuresByParent[parentPath]!;
+                                      final parentName = p.basename(parentPath);
+
+                                      return Card(
+                                        margin: const EdgeInsets.symmetric(
+                                          vertical: 8,
+                                          horizontal: 4,
+                                        ),
+                                        child: ExpansionTile(
+                                          leading: Icon(
+                                            Icons.folder,
+                                            color: Colors.red,
+                                          ),
+                                          title: Text(
+                                            parentName,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                          subtitle: Text(
+                                            'عدد الفاشلة: ${parentFailures.length}',
+                                            style: TextStyle(
+                                              color: Colors.red[700],
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                          children: [
+                                            Padding(
+                                              padding: const EdgeInsets.all(
+                                                8.0,
+                                              ),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 8.0,
+                                                        ),
+                                                    child: Text(
+                                                      'المسار: $parentPath',
+                                                      style: TextStyle(
+                                                        fontSize: 11,
+                                                        color: Colors.grey[600],
+                                                        fontStyle:
+                                                            FontStyle.italic,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 8),
+                                                  ...parentFailures.map((
+                                                    failure,
+                                                  ) {
+                                                    final sanitizedError =
+                                                        _sanitizeErrorMessage(
+                                                          failure.errorMessage,
+                                                        );
+                                                    final isLongError =
+                                                        sanitizedError.length >
+                                                        100;
+
+                                                    return Container(
+                                                      margin:
+                                                          const EdgeInsets.symmetric(
+                                                            vertical: 4,
+                                                          ),
+                                                      padding:
+                                                          const EdgeInsets.all(
+                                                            8,
+                                                          ),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.red[50],
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              8,
+                                                            ),
+                                                        border: Border.all(
+                                                          color:
+                                                              Colors.red[200]!,
+                                                        ),
+                                                      ),
+                                                      child: Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .start,
+                                                        children: [
+                                                          // Original Name
+                                                          Row(
+                                                            children: [
+                                                              Icon(
+                                                                Icons.folder,
+                                                                size: 16,
+                                                                color:
+                                                                    Colors.blue,
+                                                              ),
+                                                              const SizedBox(
+                                                                width: 4,
+                                                              ),
+                                                              Expanded(
+                                                                child: Text(
+                                                                  'الاسم الأصلي: ${failure.originalName}',
+                                                                  style: TextStyle(
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .bold,
+                                                                    fontSize:
+                                                                        13,
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                          if (failure
+                                                                  .parsedName !=
+                                                              null) ...[
+                                                            const SizedBox(
+                                                              height: 4,
+                                                            ),
+                                                            Row(
+                                                              children: [
+                                                                Icon(
+                                                                  Icons.edit,
+                                                                  size: 16,
+                                                                  color: Colors
+                                                                      .orange,
+                                                                ),
+                                                                const SizedBox(
+                                                                  width: 4,
+                                                                ),
+                                                                Expanded(
+                                                                  child: Text(
+                                                                    'الاسم المحول: ${failure.parsedName}',
+                                                                    style: TextStyle(
+                                                                      fontSize:
+                                                                          12,
+                                                                      color: Colors
+                                                                          .orange[700],
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ],
+                                                          const SizedBox(
+                                                            height: 4,
+                                                          ),
+                                                          // Error Message
+                                                          Row(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              Icon(
+                                                                Icons
+                                                                    .error_outline,
+                                                                size: 16,
+                                                                color:
+                                                                    Colors.red,
+                                                              ),
+                                                              const SizedBox(
+                                                                width: 4,
+                                                              ),
+                                                              Expanded(
+                                                                child: GestureDetector(
+                                                                  onTap:
+                                                                      isLongError
+                                                                      ? () {
+                                                                          Get.dialog(
+                                                                            Dialog(
+                                                                              child: Container(
+                                                                                width:
+                                                                                    Get.width *
+                                                                                    0.8,
+                                                                                padding: const EdgeInsets.all(
+                                                                                  16,
+                                                                                ),
+                                                                                child: Column(
+                                                                                  mainAxisSize: MainAxisSize.min,
+                                                                                  children: [
+                                                                                    Text(
+                                                                                      'تفاصيل الخطأ',
+                                                                                      style: TextStyle(
+                                                                                        fontSize: 18,
+                                                                                        fontWeight: FontWeight.bold,
+                                                                                      ),
+                                                                                    ),
+                                                                                    const SizedBox(
+                                                                                      height: 16,
+                                                                                    ),
+                                                                                    Expanded(
+                                                                                      child: SingleChildScrollView(
+                                                                                        child: SelectableText(
+                                                                                          sanitizedError,
+                                                                                          style: TextStyle(
+                                                                                            fontSize: 14,
+                                                                                          ),
+                                                                                        ),
+                                                                                      ),
+                                                                                    ),
+                                                                                    const SizedBox(
+                                                                                      height: 16,
+                                                                                    ),
+                                                                                    ElevatedButton(
+                                                                                      onPressed: () => Get.back(),
+                                                                                      child: Text(
+                                                                                        'إغلاق',
+                                                                                      ),
+                                                                                    ),
+                                                                                  ],
+                                                                                ),
+                                                                              ),
+                                                                            ),
+                                                                          );
+                                                                        }
+                                                                      : null,
+                                                                  child: Text(
+                                                                    sanitizedError,
+                                                                    style: TextStyle(
+                                                                      fontSize:
+                                                                          12,
+                                                                      color: Colors
+                                                                          .red[700],
+                                                                    ),
+                                                                    maxLines:
+                                                                        isLongError
+                                                                        ? 2
+                                                                        : null,
+                                                                    overflow:
+                                                                        isLongError
+                                                                        ? TextOverflow
+                                                                              .ellipsis
+                                                                        : null,
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                          if (isLongError)
+                                                            Padding(
+                                                              padding:
+                                                                  const EdgeInsets.only(
+                                                                    top: 4,
+                                                                  ),
+                                                              child: Text(
+                                                                'انقر لعرض التفاصيل الكاملة',
+                                                                style: TextStyle(
+                                                                  fontSize: 10,
+                                                                  color: Colors
+                                                                      .blue,
+                                                                  fontStyle:
+                                                                      FontStyle
+                                                                          .italic,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                        ],
+                                                      ),
+                                                    );
+                                                  }),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Close Button
+              ElevatedButton(
+                onPressed: () => Get.back(),
+                child: Text('موافق'),
+                style: ElevatedButton.styleFrom(
+                  minimumSize: Size(Get.width * 0.5, 40),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      barrierDismissible: true,
+    );
+  }
   // --- UI helpers
   void _showSnackBar(String message, bool isSuccess) {
     Get.rawSnackbar(
       title: isSuccess ? 'نجاح' : 'تنبيه',
       message: message,
-      backgroundColor: (isSuccess ? Colors.green : Colors.orange).withOpacity(0.95),
+      backgroundColor: (isSuccess ? Colors.green : Colors.orange).withOpacity(
+        0.95,
+      ),
       snackPosition: SnackPosition.TOP,
       margin: const EdgeInsets.all(8),
       borderRadius: 10,
@@ -1110,16 +2578,18 @@ void addToQueue(FolderData f) {
 
   void _showPersistentInfo(String message) {
     if (Get.isSnackbarOpen == true) return;
-    Get.showSnackbar(GetSnackBar(
-      title: 'الرجاء الانتظار',
-      message: message,
-      backgroundColor: Colors.blueGrey.withOpacity(0.95),
-      snackPosition: SnackPosition.TOP,
-      margin: const EdgeInsets.all(8),
-      borderRadius: 10,
-      duration: const Duration(days: 1),
-      isDismissible: false,
-    ));
+    Get.showSnackbar(
+      GetSnackBar(
+        title: 'الرجاء الانتظار',
+        message: message,
+        backgroundColor: Colors.blueGrey.withOpacity(0.95),
+        snackPosition: SnackPosition.TOP,
+        margin: const EdgeInsets.all(8),
+        borderRadius: 10,
+        duration: const Duration(days: 1),
+        isDismissible: false,
+      ),
+    );
   }
 
   void _hidePersistentSnack() {
@@ -1147,9 +2617,9 @@ void addToQueue(FolderData f) {
         }
       }
     } catch (e) {
-       Funcs.errors.add('خطأ في تعبئة الفورم: $e');
+      Funcs.errors.add('خطأ في تعبئة الفورم: $e');
       print('خطأ في تعبئة الفورم: $e');
-       final stop = await Funcs.checkRepeatingErrors();
+      final stop = await Funcs.checkRepeatingErrors();
       if (stop) {
         updateUIAfterStopeing();
       }
@@ -1163,9 +2633,9 @@ void addToQueue(FolderData f) {
   //     if (fileControl == null) return;
   //     final files = subfolder.listSync().whereType<File>().toList();
   //     if (files.isEmpty) return;
-      
+
   //     final folderName = subfolder.path.split(Platform.pathSeparator).last;
-      
+
   //     final foldersList = <Map<String, dynamic>>[
   //       {
   //         'id': null,
@@ -1182,10 +2652,10 @@ void addToQueue(FolderData f) {
   //         'apply_form_id': 0,
   //         'parent_path_t': null,
   //         'created_in_this_session': true,
-  //         'folder_path': folderName, 
+  //         'folder_path': folderName,
   //       }
   //     ];
-      
+
   //     final filesList = <Map<String, dynamic>>[];
   //     int rowNum = 1;
   //     for (final file in files) {
@@ -1194,32 +2664,32 @@ void addToQueue(FolderData f) {
   //       final fileExtension = fileName.contains('.') ? fileName.split('.').last : '';
   //       final fileSize = await file.length();
   //       final fileNameWithoutExt = fileName.contains('.') ? fileName.split('.').first : fileName;
-        
+
   //       filesList.add({
   //         'id': null,
-  //         'file': fullPath, 
-  //         'path': fullPath, 
+  //         'file': fullPath,
+  //         'path': fullPath,
   //         'version': 1,
   //         'user_id': Funcs.user_id ?? 0,
   //         'size': fileSize,
   //         'row_num': rowNum,
-  //         'parent_path_t': '0', 
-  //         'path_t': '0.$rowNum', 
+  //         'parent_path_t': '0',
+  //         'path_t': '0.$rowNum',
   //         'original_file_id': null,
-  //         'file_name': fileNameWithoutExt, 
+  //         'file_name': fileNameWithoutExt,
   //         'file_extension': fileExtension,
   //         'pages_count': 1,
   //         'folder_path': folderName,
   //         'folder_id': 1,
   //         'status': 'added',
-  //         'old_path': null,       
+  //         'old_path': null,
   //         'name': fileName,
-  //         'base64': fullPath, 
+  //         'base64': fullPath,
   //         'picked_inn_this_session': true,
   //       });
   //       rowNum++;
   //     }
-      
+
   //     _formController.setValueWithoutValidation(fileControl.id, {
   //       'files': filesList,
   //       'folders': foldersList,
@@ -1234,32 +2704,49 @@ void addToQueue(FolderData f) {
   //   }
   // }
 
- Future<void> _addFilesToFileControl(Directory subfolder) async {
+  Future<void> _addFilesToFileControl(Directory subfolder) async {
     try {
       if (_formController == null) return;
-      final fileControl = Funcs.form_model!.controls.firstWhereOrNull((c) => c.type == 7);
+      final fileControl = Funcs.form_model!.controls.firstWhereOrNull(
+        (c) => c.type == 7,
+      );
       if (fileControl == null) return;
       final files = subfolder.listSync().whereType<File>().toList();
       if (files.isEmpty) return;
       final filesList = <Map<String, dynamic>>[];
+      int Count = 1;
       for (final file in files) {
         final fullPath = file.path;
+        // print(file);
+        final fileName = p.basename(fullPath);
+        final fileExt = p.extension(fullPath);
+        // Get file size
+        final int fileSize = await file.length();
+        // print(fileName);
+        // print(fileExt);
         filesList.add({
+          'name': fileName,
           'path': fullPath,
           'base64': fullPath,
+          'file_extension': fileExt,
+          'row_num': Count,
+          'file_realName': fileName,
+          'size': fileSize,
         });
+        Count++;
       }
-      _formController.setValueWithoutValidation(fileControl.id, {'files': filesList});
+      _formController.setValueWithoutValidation(fileControl.id, {
+        'files': filesList,
+      });
     } catch (e) {
-       Funcs.errors.add('خطأ في إضافة الملفات: $e');
+      Funcs.errors.add('خطأ في إضافة الملفات: $e');
       print('خطأ في إضافة الملفات: $e');
-       final stop = await Funcs.checkRepeatingErrors();
+      final stop = await Funcs.checkRepeatingErrors();
       if (stop) {
         updateUIAfterStopeing();
       }
     }
   }
-
 
   Map<String, dynamic>? _asValueMap(dynamic raw) {
     return SubmissionService.asValueMap(raw);
@@ -1274,7 +2761,7 @@ void addToQueue(FolderData f) {
     try {
       // محاولة تحويل التاريخ من صيغ مختلفة
       DateTime? dateTime;
-      
+
       // محاولة تحويل من ISO format
       try {
         dateTime = DateTime.parse(dateValue);
@@ -1306,7 +2793,7 @@ void addToQueue(FolderData f) {
       if (dateTime != null) {
         return DateFormat('yyyy-MM-dd HH:mm:ss').format(dateTime);
       }
-      
+
       // إذا فشل التحويل، إرجاع القيمة الأصلية
       return dateValue;
     } catch (e) {
@@ -1316,43 +2803,47 @@ void addToQueue(FolderData f) {
   }
 
   /// معالجة valueMap: تحويل الحقول التي type == 5 وإزالة حقل type من جميع الحقول
-  Future<void> _processDateFieldsInValueMap(Map<String, dynamic> valueMap) async {
-    await LogServices.write('[Folder Processing] بدء معالجة valueMap (حذف type من جميع الحقول)');
-    int processedCount = 0;
-    
+  Future<void> _processDateFieldsInValueMap(
+    Map<String, dynamic> valueMap,
+  ) async {
+    // await LogServices.write('[Folder Processing] بدء معالجة valueMap (حذف type من جميع الحقول)');
+    // int processedCount = 0;
+
     // البحث عن جميع الحقول في valueMap
     for (final entry in valueMap.entries.toList()) {
       final key = entry.key;
       final value = entry.value;
-      
+
       if (value is Map<String, dynamic>) {
         // التحقق من وجود حقل type
         if (value.containsKey('type')) {
           final type = value['type'];
-          
+
           if (type == 5) {
             // تحويل قيمة التاريخ
             final dateValue = value['value'];
             final convertedDate = _convertDateToFormat(dateValue?.toString());
-            
+
             // تحديث القيمة وتحويل الـ Map إلى قيمة بسيطة (إزالة type)
             valueMap[key] = convertedDate;
-            processedCount++;
-            
-            await LogServices.write('[Folder Processing] تم تحويل حقل التاريخ $key: $dateValue -> $convertedDate');
+            // processedCount++;
+
+            await LogServices.write(
+              '[Folder Processing] تم تحويل حقل التاريخ $key: $dateValue -> $convertedDate',
+            );
           } else {
             // للحقول الأخرى، نحذف حقل type فقط ونحتفظ بالقيمة
             final fieldValue = value['value'];
             // استبدال الـ Map بالقيمة فقط (حذف type)
             valueMap[key] = fieldValue;
-            processedCount++;
+            // processedCount++;
           }
         }
       }
     }
-    
-    await LogServices.write('[Folder Processing] تم معالجة $processedCount حقل (تم حذف type من جميع الحقول)');
-    await LogServices.write('[Folder Processing] valueMap بعد المعالجة: ${jsonEncode(valueMap)}');
+
+    // await LogServices.write('[Folder Processing] تم معالجة $processedCount حقل (تم حذف type من جميع الحقول)');
+    // await LogServices.write('[Folder Processing] valueMap بعد المعالجة: ${jsonEncode(valueMap)}');
   }
 
   int _countUploadedFiles(dynamic controls) {
@@ -1366,9 +2857,9 @@ void addToQueue(FolderData f) {
     try {
       showFirstMatchDialog(valueMap);
     } catch (e) {
-       Funcs.errors.add('خطأ في فتح النافذة: $e');
+      Funcs.errors.add('خطأ في فتح النافذة: $e');
       _dialogOpen = false;
-       final stop = await Funcs.checkRepeatingErrors();
+      final stop = await Funcs.checkRepeatingErrors();
       if (stop) {
         updateUIAfterStopeing();
       }
@@ -1382,6 +2873,7 @@ void addToQueue(FolderData f) {
     _dialogOpen = false;
     await Future.delayed(const Duration(milliseconds: 20));
   }
+
   // --- utility: clear failures
   Future<void> clearFailures() async {
     try {
@@ -1389,166 +2881,312 @@ void addToQueue(FolderData f) {
       await _recordStore!.clearFailures();
       _showSnackBar('تم مسح سجل الفشل', true);
     } catch (e) {
-       Funcs.errors.add('خطأ في مسح سجل الفشل: $e');
+      Funcs.errors.add('خطأ في مسح سجل الفشل: $e');
       _showSnackBar('خطأ في مسح سجل الفشل: $e', false);
-       final stop = await Funcs.checkRepeatingErrors();
+      final stop = await Funcs.checkRepeatingErrors();
       if (stop) {
         updateUIAfterStopeing();
       }
     }
   }
 
-/// Returns folder size in bytes (recursively). Fast but may take time on big folders.
-Future<int> _directorySize(Directory dir) async {
-  var total = 0;
-  try {
-    await for (final entity in dir.list(recursive: true, followLinks: false)) {
-      if (entity is File) {
-        try {
-          final len = await entity.length();
-          total += len;
-        } catch (e) {
-           Funcs.errors.add('خطأ في حساب حجم المجلد: $e');
-          // تجاهل الملفات التي تعطي خطأ في الطول
+  /// Returns folder size in bytes (recursively). Fast but may take time on big folders.
+  Future<int> _directorySize(Directory dir) async {
+    var total = 0;
+    try {
+      await for (final entity in dir.list(
+        recursive: true,
+        followLinks: false,
+      )) {
+        if (entity is File) {
+          try {
+            final len = await entity.length();
+            total += len;
+          } catch (e) {
+            Funcs.errors.add('خطأ في حساب حجم المجلد: $e');
+            // تجاهل الملفات التي تعطي خطأ في الطول
+          }
         }
       }
+    } catch (e) {
+      print('Error calculating directory size: $e');
     }
-  } catch (e) {
-    print('Error calculating directory size: $e');
-  }
-  return total;
-}
-//Retry Pending Folders
-Future<void> _retryPendingFolders() async {
-  // Check if stop was requested before starting retry
-  if (Funcs.isStopRequested) {
-    return;
+    return total;
   }
 
-  final data = await _readFoldersData();
-  final pendingFolders = data.folders.where((fd) =>
-      fd.Status == ProcessingStatus.Processing.toString().split('.').last &&
-      (fd.taskId != null && fd.taskId!.isNotEmpty)).toList();
+  // دالة مساعدة للتحقق من أخطاء السيرفر في رسالة الخطأ
+  bool _isServerError(String? errorMessage) {
+    if (errorMessage == null || errorMessage.isEmpty) {
+      return false;
+    }
+    // التحقق من وجود أخطاء سيرفر شائعة (404, 405, 500, 502, 503, 504, إلخ)
+    final serverErrorPattern = RegExp(r'\b(40[0-9]|50[0-9])\b');
+    return serverErrorPattern.hasMatch(errorMessage);
+  }
 
-  if (pendingFolders.isEmpty) return;
-
-  _showSnackBar('إعادة فحص ${pendingFolders.length} مهمة معلقة...', true);
-
-  final retryDelays = <Duration>[
-    const Duration(seconds: 5),
-    const Duration(seconds: 15),
-    const Duration(seconds: 60)
-  ];
-  final maxAttempts = retryDelays.length;
-
-  for (final pf in pendingFolders) {
-    // Check if stop was requested before processing each pending folder
+  //Retry Pending Folders
+  Future<void> _retryPendingFolders() async {
+    // Check if stop was requested before starting retry
     if (Funcs.isStopRequested) {
       return;
     }
 
-    bool resolved = false;
-    String lastErrorMessage = '';
+    // التحقق من أن currentFolderPath موجود
+    if (currentFolderPath.value.isEmpty) {
+      return;
+    }
 
-    for (int attempt = 0; attempt < maxAttempts; attempt++) {
-      // Check if stop was requested before each retry attempt
+    final data = await _readFoldersData();
+    // فلترة المعلقات التي في نفس مسار مجلد الأب فقط
+    final pendingFolders = data.folders
+        .where(
+          (fd) =>
+              !fd.isDeleted &&
+              fd.path.startsWith(currentFolderPath.value) &&
+              fd.path != currentFolderPath.value && // استبعاد مجلد الأب نفسه
+              fd.Status ==
+                  ProcessingStatus.Processing.toString().split('.').last &&
+              (fd.taskId != null && fd.taskId!.isNotEmpty),
+        )
+        .toList();
+
+    if (pendingFolders.isEmpty) return;
+    // await Get.defaultDialog(
+    //   cancel: TextButton(
+    //     onPressed: () {
+    //       Get.back();
+    //       return;
+    //     },
+    //     child: Text('إلغاء'),
+    //   ),
+    //   confirm: ElevatedButton(
+    //     onPressed: () async {
+    //       await _retryPendingFolders();
+
+    //       Get.back();
+    //     },
+    //     child: Text('موافق'),
+    //   ),
+    //   title: 'إعادة فحص الملعقات',
+    //   middleText: 'هل تريد إعادة فحص المهمات المعلقة؟',
+    // );
+    
+    _showSnackBar('إعادة فحص ${pendingFolders.length} مهمة معلقة...', true);
+
+    final retryDelays = <Duration>[
+      const Duration(seconds: 5),
+      const Duration(seconds: 15),
+      const Duration(seconds: 30),
+    ];
+    final maxAttempts = retryDelays.length;
+
+    for (final pf in pendingFolders) {
+      // Check if stop was requested before processing each pending folder
       if (Funcs.isStopRequested) {
         return;
       }
 
-      if (attempt > 0) await Future.delayed(retryDelays[attempt]);
+      bool resolved = false;
+      String lastErrorMessage = '';
 
-      try {
-        final check = await SubmissionService.pollForGracePeriod(
-          taskId: pf.taskId!,
-          accessToken: pf.accessToken, // استخدام accessToken المحفوظ
-          refreshToken: pf.refreshToken, // استخدام refreshToken المحفوظ
-          grace: const Duration(seconds: 20),
-          pollInterval: const Duration(seconds: 3),
-          perAttemptTimeout: Duration(seconds: 35 + (attempt * 10)), // ازدياد المهلة مع المحاولات (35 ثانية كحد أدنى)
-          shouldStop: () => Funcs.isStopRequested,
-        );
-
-        // Check again after polling
+      for (int attempt = 0; attempt < maxAttempts; attempt++) {
+        // Check if stop was requested before each retry attempt
         if (Funcs.isStopRequested) {
           return;
         }
 
-        if (check.status == SubmissionStatus.success && check.applyId != null) {
-          final applyId = check.applyId!;
-          await _updateFolderStatus(pf.path, ProcessingStatus.Success, 'تمت المعالجة بعد إعادة الفحص', processedAt: DateTime.now());
-          await _saveSuccess(Record(
+        if (attempt > 0) await Future.delayed(retryDelays[attempt]);
+
+        try {
+          final check = await SubmissionService.pollForGracePeriod(
+            taskId: pf.taskId!,
+            accessToken: pf.accessToken, // استخدام accessToken المحفوظ
+            refreshToken: pf.refreshToken, // استخدام refreshToken المحفوظ
+            grace: const Duration(seconds: 20),
+            pollInterval: const Duration(seconds: 3),
+            perAttemptTimeout: Duration(
+              seconds: 35 + (attempt * 10),
+            ), // ازدياد المهلة مع المحاولات (35 ثانية كحد أدنى)
+            shouldStop: () => Funcs.isStopRequested,
+          );
+
+          // Check again after polling
+          if (Funcs.isStopRequested) {
+            return;
+          }
+
+          if (check.status == SubmissionStatus.success &&
+              check.applyId != null) {
+            final applyId = check.applyId!;
+            await _updateFolderStatus(
+              pf.path,
+              ProcessingStatus.Success,
+              'تمت المعالجة بعد إعادة الفحص',
+              processedAt: DateTime.now(),
+            );
+            await _saveSuccess(
+              Record(
+                originalName: pf.name,
+                parsedName: pf.name,
+                errorMessage: 'تم الرفع والإرسال بنجاح (applyId: $applyId)',
+                timestamp: DateTime.now(),
+                folderPath: pf.path,
+              ),
+            );
+            successCount.value++;
+            resolved = true;
+            break;
+          }
+
+          if (check.status == SubmissionStatus.pending) {
+            lastErrorMessage = 'ما زال قيد الانتظار (attempt ${attempt + 1})';
+            await _updateFolderStatus(
+              pf.path,
+              ProcessingStatus.Processing,
+              lastErrorMessage,
+              attempts: pf.attempts + 1,
+              taskId: pf.taskId,
+            );
+            continue;
+          }
+
+          if (check.status == SubmissionStatus.error) {
+            lastErrorMessage =
+                check.errorMessage ?? 'خطأ غير معروف أثناء الفحص';
+            
+            // التحقق من وجود خطأ سيرفر وإعادة الإرسال
+            if (_isServerError(check.errorMessage)) {
+              try {
+                _showSnackBar(
+                  'تم اكتشاف خطأ سيرفر (${check.errorMessage}) - إعادة إرسال المجلد ${pf.name}...',
+                  true,
+                );
+                
+                // التحقق من وجود المجلد
+                final folderDir = Directory(pf.path);
+                if (!await folderDir.exists()) {
+                  lastErrorMessage = 'المجلد غير موجود: ${pf.path}';
+                  continue;
+                }
+                
+                // إعادة معالجة المجلد من جديد
+                final result = await _processSingleSubfolderWrapped(folderDir);
+                
+                // التحقق من النتيجة
+                if (result.status == ProcessingStatus.Success) {
+                  final applyId = result.applyId;
+                  await _updateFolderStatus(
+                    pf.path,
+                    ProcessingStatus.Success,
+                    'تمت المعالجة بعد إعادة الإرسال بسبب خطأ سيرفر',
+                    processedAt: DateTime.now(),
+                  );
+                  await _saveSuccess(
+                    Record(
+                      originalName: pf.name,
+                      parsedName: pf.name,
+                      errorMessage: 'تم الرفع والإرسال بنجاح بعد إعادة الإرسال بسبب خطأ سيرفر${applyId != null ? " (applyId: $applyId)" : ""}',
+                      timestamp: DateTime.now(),
+                      folderPath: pf.path,
+                    ),
+                  );
+                  successCount.value++;
+                  resolved = true;
+                  break; // نجحت المعالجة، اخرج من الحلقة
+                } else if (result.status == ProcessingStatus.Processing ||
+                    result.status == ProcessingStatus.Pending) {
+                  // تم إرسال الطلب بنجاح ولكن ما زال قيد الانتظار
+                  lastErrorMessage = 'تم إعادة الإرسال - قيد الانتظار';
+                  await _updateFolderStatus(
+                    pf.path,
+                    ProcessingStatus.Processing,
+                    lastErrorMessage,
+                    attempts: pf.attempts + 1,
+                  );
+                  // استمر في المحاولات للتحقق من النتيجة
+                  continue;
+                } else {
+                  // فشلت إعادة المعالجة
+                  lastErrorMessage =
+                      'فشلت إعادة الإرسال: ${result.errorMessage ?? "خطأ غير معروف"}';
+                  continue;
+                }
+              } catch (e) {
+                Funcs.errors.add('خطأ في إعادة إرسال المجلد بسبب خطأ سيرفر: $e');
+                lastErrorMessage = 'خطأ في إعادة الإرسال: $e';
+                continue;
+              }
+            } else {
+              // ليس خطأ سيرفر، استمر في المحاولات العادية
+              continue;
+            }
+          }
+        } catch (e) {
+          Funcs.errors.add('خطأ في إعادة فحص المهمة المعلقة: $e');
+          lastErrorMessage = e.toString();
+          final stop = await Funcs.checkRepeatingErrors();
+          if (stop) {
+            updateUIAfterStopeing();
+            return; // Exit early when stop is requested
+          }
+
+          continue;
+        }
+      }
+
+      // Check before finalizing this folder
+      if (Funcs.isStopRequested) {
+        return;
+      }
+
+      if (!resolved) {
+        Funcs.errors.add(
+          'لم تصل نتيجة بعد ${maxAttempts} محاولات؛ يتم ختم المعالجة بتاريخ الآن',
+        );
+        final msg =
+            'لم تصل نتيجة بعد ${maxAttempts} محاولات؛ يتم ختم المعالجة بتاريخ الآن';
+        await _updateFolderStatus(
+          pf.path,
+          ProcessingStatus.Error,
+          msg,
+          processedAt: DateTime.now(),
+        );
+        failureCount.value++;
+        await _saveFailure(
+          Record(
             originalName: pf.name,
             parsedName: pf.name,
-            errorMessage: 'تم الرفع والإرسال بنجاح (applyId: $applyId)',
+            errorMessage:
+                msg +
+                (lastErrorMessage.isNotEmpty
+                    ? ' — last: $lastErrorMessage'
+                    : ''),
             timestamp: DateTime.now(),
             folderPath: pf.path,
-          ));
-          successCount.value++;
-          resolved = true;
-          break;
-        }
-
-        if (check.status == SubmissionStatus.pending) {
-          lastErrorMessage = 'ما زال قيد الانتظار (attempt ${attempt + 1})';
-          await _updateFolderStatus(pf.path, ProcessingStatus.Processing, lastErrorMessage, attempts: (pf.attempts ?? 0) + 1, taskId: pf.taskId);
-          continue;
-        }
-
-        if (check.status == SubmissionStatus.error) {
-          lastErrorMessage = check.errorMessage ?? 'خطأ غير معروف أثناء الفحص';
-          continue;
-        }
-      } catch (e) {
-        Funcs.errors.add('خطأ في إعادة فحص المهمة المعلقة: $e');
-        lastErrorMessage = e.toString();
+          ),
+        );
         final stop = await Funcs.checkRepeatingErrors();
         if (stop) {
           updateUIAfterStopeing();
           return; // Exit early when stop is requested
         }
-
-        continue;
-      }
-    }
-
-    // Check before finalizing this folder
-    if (Funcs.isStopRequested) {
-      return;
-    }
-
-    if (!resolved) {
-       Funcs.errors.add('لم تصل نتيجة بعد ${maxAttempts} محاولات؛ يتم ختم المعالجة بتاريخ الآن');
-      final msg = 'لم تصل نتيجة بعد ${maxAttempts} محاولات؛ يتم ختم المعالجة بتاريخ الآن';
-      await _updateFolderStatus(pf.path, ProcessingStatus.Error, msg, processedAt: DateTime.now());
-      failureCount.value++;
-      await _saveFailure(Record(
-        originalName: pf.name,
-        parsedName: pf.name,
-        errorMessage: msg + (lastErrorMessage.isNotEmpty ? ' — last: $lastErrorMessage' : ''),
-        timestamp: DateTime.now(),
-        folderPath: pf.path,
-      ));
-       final stop = await Funcs.checkRepeatingErrors();
-      if (stop) {
-        updateUIAfterStopeing();
-        return; // Exit early when stop is requested
       }
 
+      await Future.delayed(const Duration(seconds: 2));
     }
 
-    await Future.delayed(const Duration(seconds: 2));
-  }
-}
-
-void updateUIAfterStopeing(){
-  // Don't reset stop flag here - it should remain set until a new process starts
-  // This ensures any remaining checks will see the stop flag
-  _hidePersistentSnack();
-  _closePreviewDialogIfAny();
-  isProcessing.value = false;
-  _showSnackBar('تم إيقاف المعالجة حسب الطلب', false);
-  //  Get.reloadAll(force: true);
+    // تحديث عدد المعلقات بعد إعادة الفحص
+    await _updatePendingCount();
   }
 
+  void updateUIAfterStopeing() {
+    // Don't reset stop flag here - it should remain set until a new process starts
+    // This ensures any remaining checks will see the stop flag
+    _hidePersistentSnack();
+    _closePreviewDialogIfAny();
+    isProcessing.value = false;
+    
+    _showSnackBar('تم إيقاف المعالجة حسب الطلب', false);
+    //  Get.reloadAll(force: true);
+  }
 }

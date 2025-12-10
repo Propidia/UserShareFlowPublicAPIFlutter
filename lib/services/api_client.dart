@@ -32,6 +32,7 @@ class ApiClient {
       final res = await http
           .get(uri, headers: _headers)
           .timeout(AppConfig.httpTimeout);
+          print('res.body: ${res.body}');
       await LogServices.write('[ApiClient] Response Status: ${res.statusCode}');
       if (res.statusCode == 200) {
         final List<dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
@@ -52,10 +53,13 @@ class ApiClient {
       final uri = _uri('api/Bring_TheControls_Of_Released_EntryForm', {
         'form_id': formId.toString(),
       });
+      print('uri: $uri');
+      print('_headers: $_headers');
       final res = await http
           .get(uri, headers: _headers)
           .timeout(AppConfig.httpTimeout);
       await LogServices.write('[ApiClient]fetch Form Structure Response Body: ${res.statusCode}');
+      print('res.body: ${res.body}');
       if (res.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
         final result = FormStructureModel.fromJson(data);
@@ -144,7 +148,7 @@ class ApiClient {
     try {
       final uri = _uri(AppConfig.submitFormEndpoint);
       // await LogServices.write('[ApiClient] URI: $uri');
-
+      // await LogServices.write('[ApiClient] payload: $payload');
       final res = await http
           .post(uri, body: jsonEncode(payload), headers: _headers)
           .timeout(AppConfig.httpTimeout);
@@ -157,7 +161,7 @@ class ApiClient {
         await LogServices.write('[ApiClient] ✅ تم إرسال النموذج بنجاح');
         return data;
       }
-      await LogServices.write('[ApiClient] ❌ فشل إرسال النموذج - Status: ${res.body}, Body: $sanitizedBody');
+      await LogServices.write('[ApiClient] ❌ فشل إرسال النموذج - Status: ${res.body}');
       throw Exception('فشل إرسال النموذج (${res.statusCode})');
     } catch (e) {
       await LogServices.write('[ApiClient] ❌ Exception في submitForm: $e');
@@ -187,7 +191,7 @@ class ApiClient {
           .timeout(AppConfig.httpTimeout);
 
       final sanitizedBody = Funcs.sanitizeResponse(res.body);
-      await LogServices.write('[ApiClient] checkTaskStatus Response Status: ${res.statusCode} - task_id: $taskId - Body: $sanitizedBody');
+      await LogServices.write('[ApiClient] checkTaskStatus Response Status: ${res.statusCode} - task_id: $taskId');
 
       if (res.statusCode == 200) {
         await LogServices.write('[ApiClient] ✅ تم التحقق من حالة المهمة بنجاح - task_id: $taskId');
@@ -209,7 +213,7 @@ class ApiClient {
   Future<Map<String, dynamic>> refreshAccessToken(String refreshToken) async {
     await LogServices.write('[ApiClient] بدء تجديد access token');
     try {
-      final uri = _uri('api/refresh_token'); // تأكد من تغيير المسار حسب API الخاص بك
+      final uri = _uri('pro_local/rerefresh'); 
       final body = jsonEncode({'refresh_token': refreshToken});
       
       final res = await http
@@ -221,7 +225,7 @@ class ApiClient {
 
       if (res.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
-        await LogServices.write('[ApiClient] ✅ تم تجديد access token بنجاح');
+        // await LogServices.write('[ApiClient] ✅ تم تجديد access token بنجاح');
         return data;
       }
       await LogServices.write('[ApiClient] ❌ فشل تجديد access token - Status: ${res.body}');
@@ -253,8 +257,8 @@ class ApiClient {
     // POST بدون body (يكفي الهيدر)
     final res = await http.post(uri, headers: _headers).timeout(AppConfig.httpTimeout);
 
-    final sanitizedBody = Funcs.sanitizeResponse(res.body);
-    await LogServices.write('[ApiClient] getFirstMatch Response Status: ${res.statusCode} - Body: $sanitizedBody');
+    // final sanitizedBody = Funcs.sanitizeResponse(res.body);
+    await LogServices.write('[ApiClient] getFirstMatch Response Status: ${res.statusCode}');
 
     if (res.statusCode == 200) {
       await LogServices.write('[ApiClient] ✅ تم العثور على تطابق بنجاح - form_id: $formId, control_id: $controlId');

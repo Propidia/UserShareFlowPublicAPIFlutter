@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'package:useshareflowpublicapiflutter/help/log.dart';
 import 'package:useshareflowpublicapiflutter/minio/MinIOClass.dart';
 import 'package:useshareflowpublicapiflutter/models/process_task.dart';
 import '../models/form_models.dart';
@@ -440,7 +439,7 @@ class FormController extends GetxController {
       completePayload: tempPayload,
       formStructure: form,
     );
-    await LogServices.write('[FormController] uploadFormFilesToMinIOValues: $uploadResult');
+    // await LogServices.write('[FormController] uploadFormFilesToMinIOValues: $uploadResult');
 
     // دائماً التقط foldername المرجع من الدالة (قد توجد ملفات رُفعت جزئياً)
     folderName = uploadResult.$2;
@@ -583,6 +582,8 @@ class FormController extends GetxController {
 
       if (taskResult.status == TaskStatus.success) {
         _showSuccessMessage(taskResult.applyId!);
+        // تنظيف البيانات بعد نجاح الإرسال
+        clearFormData();
       } else if (taskResult.status == TaskStatus.pending &&
           taskResult.taskId != null) {
         await _handleAsyncTask(taskResult.taskId!, taskResult.accessToken);
@@ -617,6 +618,8 @@ class FormController extends GetxController {
 
     if (result.isSuccess && result.applyId != null) {
       _showSuccessMessage(result.applyId!);
+      // تنظيف البيانات بعد نجاح المهمة غير المتزامنة
+      clearFormData();
     }
   }
 
@@ -628,5 +631,16 @@ class FormController extends GetxController {
       colorText: Colors.white,
       duration: const Duration(seconds: 4),
     );
+  }
+
+  /// تنظيف جميع البيانات المؤقتة بعد إرسال النموذج بنجاح
+  void clearFormData() {
+    print('🧹 تنظيف بيانات النموذج بعد الإرسال...');
+    values.clear();
+    tableRowCounts.clear();
+    // ملاحظة: لا نمسح dependencies و connectedDependencies لأنها جزء من هيكل النموذج
+    // ولكن نمسح القيم فقط
+    forceUpdate();
+    print('✅ تم تنظيف بيانات النموذج');
   }
 }

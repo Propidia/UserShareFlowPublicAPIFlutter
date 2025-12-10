@@ -1,19 +1,28 @@
 class AppConfig {
   AppConfig._();
 
-  // static const String baseUrl = 'http://84.247.170.51/';
+  // static const String baseUrl = 'https://84.247.170.51/';
   static const String password = '123456';
 
-  static const String baseUrl = 'http://10.103.70.67/';
-  static const String apiKey = 'a9198549a3b00949355a09d2a';
+  // static const String baseUrl = 'http://10.103.70.67/';
+  static const String baseUrl = 'https://10.103.18.10/';
+  static const String apiKey = '6c6a839ffbcee9709d873056e';
+
   // static const String username = '770555246';
   // static const String licenseKey = '84d3e13d81061b2c747fd5f17';
 
-  static const String username = '771302404';
-  static const String licenseKey = 'de96c5f3ce928abf4f7b1d16e';
+//API USER
+ static const String username = '712005207';
+  static const String licenseKey = 'a7ba7bc4f513b60103e99643c';
+//Basil
+//  static const String username = '772714333';
+//   static const String licenseKey = '994802ce5a3d68dfd0eb24b9d';
+//Az aldeen
+  // static const String username = '771302404';
+  // static const String licenseKey = 'de96c5f3ce928abf4f7b1d16e';
 
   // static const String baseUrl = 'http://localhost:8001/';
-  // static const String apiKey = '6c6a839ffbcee9709d873056e';
+  // static const String apiKey = 'a9198549a3b00949355a09d2a';
   // static const String username = '777800777';
   // static const String licenseKey = 'c9a3c5e0easdasd1f42377350b073ab';
 
@@ -24,7 +33,8 @@ class AppConfig {
   /// عنوان خادم MinIO
   /// يمكن تغييره حسب البيئة (تطوير، إنتاج)
   // static String minio_end_point = "84.247.170.51";
-  static const String minio_end_point = '10.103.70.67';
+  // static const String minio_end_point = '10.103.70.67';
+  static const String minio_end_point = '10.103.18.10';
   // static const String minio_end_point = 'localhost';
 
   static const int minio_port = 9000;
@@ -41,3 +51,4 @@ class AppConfig {
 
   static const Duration httpTimeout = Duration(seconds: 600);
 }
+

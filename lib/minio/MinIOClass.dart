@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:minio/io.dart';
 import 'package:minio/minio.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:useshareflowpublicapiflutter/config.dart';
 import 'package:useshareflowpublicapiflutter/help/funcs.dart';
 import 'package:useshareflowpublicapiflutter/help/log.dart';
@@ -105,18 +104,6 @@ class MinIOClass {
     }
   }
 
-// يُفترض استيراد Minio هنا
-// يُفترض استيراد Uuid هنا
-// يُفترض استيراد getTemporaryDirectory هنا
-
-// ملاحظة: يجب تعريف bucketName و _minio و Funcs و SubmissionService
-// و _cleanMapForJson في نطاق يمكن الوصول إليه.
-
-// مثال تعريفي (يجب استبداله بالتعريف الفعلي في مشروعك)
-// const String bucketName = 'your-bucket-name';
-// final Minio _minio = Minio(endPoint: '...'); 
-// Map<String, dynamic> _cleanMapForJson(Map<String, dynamic> map) => map; 
-
 Future<(String, String)> uploadFormFilesToMinIOValues(
     Map<int, dynamic> formControlsValues,
     String folderName, {
@@ -126,16 +113,16 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
   String res = "success";
   String folder_name = 'noFolder';
   try {
-    await LogServices.write('[MinIO] Using bucket: $bucketName, prefix: $folderName');
+    // await LogServices.write('[MinIO] Using bucket: $bucketName, prefix: $folderName');
     print('Using bucket: $bucketName, prefix: $folderName');
-    await LogServices.write('[MinIO] formControlsValues keys: ${formControlsValues.keys.toList()}');
+    // await LogServices.write('[MinIO] formControlsValues keys: ${formControlsValues.keys.toList()}');
     print('formControlsValues keys: ${formControlsValues.keys.toList()}');
     
     // Log تفصيلي لكل control
     formControlsValues.forEach((controlId, value) {
       final valueType = value.runtimeType;
       final valueStr = value is Map ? jsonEncode(value) : value.toString();
-      LogServices.write('[MinIO] formControlsValues[$controlId]: type=$valueType, value=$valueStr');
+      // LogServices.write('[MinIO] formControlsValues[$controlId]: type=$valueType, value=$valueStr');
       print('formControlsValues[$controlId]: type=$valueType, value=$valueStr');
     });
 
@@ -143,7 +130,7 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
     bool found = await _minio.bucketExists(bucketName);
     if (!found) {
       await _minio.makeBucket(bucketName);
-      await LogServices.write('[MinIO] Bucket "$bucketName" created.');
+      // await LogServices.write('[MinIO] Bucket "$bucketName" created.');
       print('Bucket "$bucketName" created.');
     }
 
@@ -159,19 +146,19 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
       // 🚨 نقطة التصحيح الرئيسية: يجب أن تكون القيمة خريطة تحتوي على 'files'
       if (value is! Map<String, dynamic>) {
         final msg = '⚠️ Skipping controlId $controlId: value is not a Map (${value.runtimeType})';
-        LogServices.write('[MinIO] $msg');
+        // LogServices.write('[MinIO] $msg');
         print(msg);
         continue;
       }
 
-      LogServices.write('[MinIO] controlId $controlId value keys: ${(value as Map).keys.toList()}');
+      // LogServices.write('[MinIO] controlId $controlId value keys: ${(value as Map).keys.toList()}');
       print('controlId $controlId value keys: ${(value as Map).keys.toList()}');
 
       final dynamic files = value['files'];
       
       if (files == null) {
         final msg = '⚠️ Skipping controlId $controlId: no files key. Available keys: ${value.keys.toList()}';
-        LogServices.write('[MinIO] $msg');
+        // LogServices.write('[MinIO] $msg');
         print(msg);
         continue;
       }
@@ -182,7 +169,7 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
       if (files is! List) {
         // يتم تسجيل هذه الرسالة إذا كانت قيمة 'files' هي 'String' مثلاً
         final msg = '⚠️ Skipping controlId $controlId: files is not a List (${files.runtimeType})';
-        LogServices.write('[MinIO] $msg');
+        // LogServices.write('[MinIO] $msg');
         print(msg);
         continue;
       }
@@ -195,70 +182,37 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
         LogServices.write('[MinIO] Processing file[$i] in controlId $controlId, type: ${f.runtimeType}');
         print('Processing file[$i] in controlId $controlId, type: ${f.runtimeType}');
         
+        // تسجيل معلومات إضافية عن الملف
+        if (f is Map<String, dynamic>) {
+          final filePath = f['base64'] as String?;
+          final fileName = f['name'] as String?;
+          await LogServices.write('[MinIO] File details - name: $fileName, path: $filePath');
+        }
+        
         if (f is! Map<String, dynamic>) {
           final msg = '⚠️ Skipping file[$i]: not a Map (${f.runtimeType})';
-          LogServices.write('[MinIO] $msg');
+          // LogServices.write('[MinIO] $msg');
           print(msg);
           continue;
         }
 
-        LogServices.write('[MinIO] file[$i] keys: ${(f as Map).keys.toList()}, base64: ${f['base64']}, name: ${f['name']}');
+        // LogServices.write('[MinIO] file[$i] keys: ${(f as Map).keys.toList()}, base64: ${f['base64']}, name: ${f['name']}');
         print('file[$i] keys: ${(f as Map).keys.toList()}, base64: ${f['base64']}, name: ${f['name']}');
 
-        // التحقق من أن الملف لم يتم رفعه مسبقاً
-        // الملف مرفوع إذا كان base64 يحتوي على UUID (يحتوي على -) أو إذا كان path يبدأ بـ folder name
-        final String? base64Value = (f['base64'] as String?)?.trim();
-        final String? pathValue = (f['path'] as String?)?.trim();
-        
-        // UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (يحتوي على 4 شرطات)
-        final bool hasUuidFormat = base64Value != null && 
-            base64Value.contains('-') && 
-            base64Value.split('-').length == 5; // UUID يحتوي على 5 أجزاء مفصولة بـ -
-        
-        // التحقق من أن path يبدأ بـ folder name (مرفوع إلى MinIO)
-        final bool pathIsMinIOPath = pathValue != null && 
-            !pathValue.contains('\\') && // لا يحتوي على backslash (Windows path)
-            !pathValue.contains(':/') && // لا يحتوي على colon (Windows drive)
-            pathValue.split('/').length >= 2; // يحتوي على folder/file structure
-        
-        final bool alreadyUploaded = hasUuidFormat || pathIsMinIOPath;
-
-        LogServices.write('[MinIO] file[$i] upload check: base64=$base64Value, path=$pathValue, hasUuidFormat=$hasUuidFormat, pathIsMinIOPath=$pathIsMinIOPath, alreadyUploaded=$alreadyUploaded');
-        print('file[$i] upload check: base64=$base64Value, path=$pathValue, hasUuidFormat=$hasUuidFormat, pathIsMinIOPath=$pathIsMinIOPath, alreadyUploaded=$alreadyUploaded');
-
-        if (alreadyUploaded) {
-          final msg = '⏭️ Skipping already uploaded file: ${f['name']} (base64: $base64Value, path: $pathValue)';
-          LogServices.write('[MinIO] $msg');
-          print(msg);
-          continue;
-        }
-
-        final String? candidate = (f['base64'] as String?)?.trim();
-        final bool looksRemote = candidate != null &&
-            (candidate.startsWith('http://') || candidate.startsWith('https://'));
-        
-        // التحقق من أن القيمة هي مسار محلي موجود للملف
-        final bool fileExists = candidate != null ? File(candidate).existsSync() : false;
-        final bool isLocal = candidate != null && candidate.isNotEmpty && !looksRemote && fileExists;
-        
-        LogServices.write('[MinIO] file[$i] check: candidate=$candidate, looksRemote=$looksRemote, fileExists=$fileExists, isLocal=$isLocal');
-        print('file[$i] check: candidate=$candidate, looksRemote=$looksRemote, fileExists=$fileExists, isLocal=$isLocal');
-        
-        if (isLocal) {
-          filesToUpload.add({'file': f, 'values': value, 'fileIndex': i});
-          final msg = '✅ Added file to upload queue: ${f['name']} (path: $candidate)';
-          LogServices.write('[MinIO] $msg');
-          print(msg);
-        } else {
-          final msg = '⚠️ Skipping file ${f['name']}: isLocal=$isLocal, candidate=$candidate, looksRemote=$looksRemote, exists=$fileExists';
-          LogServices.write('[MinIO] $msg');
-          print(msg);
-        }
+        // إضافة الملف مباشرة لقائمة الرفع
+        filesToUpload.add({'file': f, 'values': value, 'fileIndex': i});
+        print('✅ Added file to upload queue: ${f['name']}');
       }
     }
 
     await LogServices.write('[MinIO] Found ${filesToUpload.length} files to upload');
     print('Found ${filesToUpload.length} files to upload');
+    
+    // تسجيل تفاصيل الملفات التي سيتم رفعها
+    if (filesToUpload.isEmpty) {
+      await LogServices.write('[MinIO] ⚠️ No files to upload - all files were either already uploaded or skipped');
+      print('⚠️ Warning: No files to upload');
+    }
 
     // توليد اسم مجلد رئيسي واحد للدفعة
     String platform = 'win';
@@ -271,7 +225,7 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
     // يُفترض أن Funcs.form_id مُعرّف ومتاح
     folder_name = '${DateTime.now().millisecondsSinceEpoch}z${platform}z${Funcs.form_id}';
 
-    int uploadedCount = 0;
+    int uploadedCount = 1;
     int errorCount = 0;
     final uuid = Uuid(); // يُفترض أن Uuid مُعرف ومتاح
 
@@ -283,10 +237,29 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
       try {
         final String filePath = (file['base64'] as String).trim();
         final f = File(filePath);
-        if (!f.existsSync()) {
-          print('⚠️ File not found: ' + filePath);
+        
+        // التحقق من وجود الملف مع معالجة أفضل لمسارات الشبكة
+        bool fileExists = false;
+        try {
+          fileExists = f.existsSync();
+        } catch (e) {
+          // محاولة بديلة للتحقق من مسارات الشبكة
+          try {
+            await f.length(); // إذا نجح، الملف موجود
+            fileExists = true;
+          } catch (_) {
+            fileExists = false;
+          }
+        }
+        
+        if (!fileExists) {
+          print('⚠️ File not found or inaccessible: $filePath');
+          await LogServices.write('[MinIO] ⚠️ File not found: $filePath');
           continue;
         }
+
+        // Get file size
+        final int fileSize = await f.length();
 
         String fileExtension = 'bin';
         final String? originalName = file['name'] as String?;
@@ -316,22 +289,34 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
 
         // تحديث قيمة الملف في الخريطة الأصلية (formControlsValues)
         final dynamic filesList = values['files'];
+      
         if (fileIndex != null &&
             filesList is List &&
             fileIndex >= 0 &&
             fileIndex < filesList.length) {
           final dynamic entry = filesList[fileIndex];
           if (entry is Map<String, dynamic>) {
-            entry['base64'] = uuidPath; // UUID فقط مع الصيغة
-            entry['path'] = fullMinIOPath;// نفس path - مطلوب للـ Worker
+            entry['base64'] = fullMinIOPath; 
+            entry['path'] = fullMinIOPath;
+            entry['file_extension'] = fileExtension;
+            entry['status'] = "added";
+            entry['row_num'] = uploadedCount;
+            entry['file_realName'] = file['file_realName'];
+            entry['size'] = fileSize;
+
             
-            print('entry updated: base64=$uuidPath, path=$fullMinIOPath, file=$fullMinIOPath');
+            print('entry updated: base64=$fullMinIOPath, path=$fullMinIOPath, file_extension=$fileExtension, size=$fileSize');
           }
         } else {
-          file['base64'] = uuidPath; // UUID فقط مع الصيغة
-          file['path'] = fullMinIOPath; // نفس path - مطلوب للـ Worker
+          file['base64'] = uuidPath; 
+          file['path'] = fullMinIOPath; 
+          file['file_extension'] = fileExtension;
+          file['status'] = "added";
+          file['row_num'] = uploadedCount;
+          file['file_realName'] = file['file_realName'];
+          file['size'] = fileSize;
           
-          print('file updated: base64=$uuidPath, path=$fullMinIOPath, file=$fullMinIOPath');
+         print('entry updated: base64=$fullMinIOPath, path=$fullMinIOPath, file_extension=$fileExtension, size=$fileSize');
         }
 
         // values['foldername'] = folder_name; // حفظ اسم المجلد في بيانات التحكم
@@ -339,9 +324,18 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
         await LogServices.write('[MinIO] ✅ Uploaded successfully: $uuidPath -> $objectPath');
         print('  ✅ Uploaded successfully: $uuidPath -> $objectPath');
       } catch (e) {
-        final errorMsg = '❌ Failed to upload ${file['name']}: $e';
+        final String fileName = file['name'] ?? 'unknown';
+        final String filePathForLog = (file['base64'] as String?)?.trim() ?? 'unknown path';
+        final errorMsg = '❌ Failed to upload $fileName from path: $filePathForLog - Error: $e';
         await LogServices.write('[MinIO] $errorMsg');
         print('  $errorMsg');
+        
+        // تسجيل تفاصيل إضافية للتشخيص
+        if (e.toString().contains('FileSystemException') || e.toString().contains('not found')) {
+          await LogServices.write('[MinIO] 🔍 File access error - Path may be network share or inaccessible');
+          print('  🔍 Hint: Check network path accessibility: $filePathForLog');
+        }
+        
         errorCount += 1;
       }
     }
@@ -359,15 +353,7 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
     //   print('📝 إنشاء ملف JSON بالبيانات...');
       Map<String, dynamic> jsonDataToSave;
       
-      if (formStructure != null && completePayload != null) {
-        // بناء JSON كامل من FormStructureModel و formControlsValues
-        jsonDataToSave = _buildCompleteWorkerJson(
-          formStructure,
-          completePayload,
-          formControlsValues,
-          folder_name,
-        );
-      } else if (completePayload != null) {
+     if (completePayload != null) {
         // استخدام الـ payload الكامل الممرر من buildSubmitPayload
         jsonDataToSave = Map<String, dynamic>.from(completePayload);
         // تحديث foldername في الـ payload
@@ -388,16 +374,7 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
         jsonDataToSave = cleanData;
       }
 
-      // final jsonData = jsonEncode(jsonDataToSave);
-      // final tempDir = await getTemporaryDirectory();
-      // final jsonFile = File('${tempDir.path}/$folder_name.json');
-      // await jsonFile.writeAsString(jsonData, encoding: utf8);
-
-      // final jsonObjectPath = '$folder_name/$folder_name.json';
-      // await _minio.fPutObject(bucketName, jsonObjectPath, jsonFile.path);
-      // print('✅ تم رفع ملف JSON بنجاح: $jsonObjectPath');
-      // print('jsonData: $jsonData');
-      // await jsonFile.delete();
+    
     } catch (jsonError) {
       print('⚠️ تحذير: فشل إنشاء ملف JSON: $jsonError');
     }
@@ -467,248 +444,6 @@ Future<(String, String)> uploadFormFilesToMinIOValues(
     return cleaned;
   }
 
-  /// بناء JSON كامل يشبه ما يتوقعه الـ worker (مثل ConvertFormToJson_insert_begin)
-  Map<String, dynamic> _buildCompleteWorkerJson(
-    FormStructureModel formStructure,
-    Map<String, dynamic> completePayload,
-    Map<int, dynamic> formControlsValues,
-    String folderName,
-  ) {
-    final List<Map<String, dynamic>> controls = [];
-    
-    // بناء controls كاملة مع جميع الحقول المطلوبة (مثل ControlModel.toMap())
-    for (final control in formStructure.controls) {
-      final controlValue = formControlsValues[control.id];
-      Map<String, dynamic>? payloadControl;
-      final controlsList = completePayload['controls'] as List?;
-      if (controlsList != null) {
-        try {
-          payloadControl = controlsList.firstWhere(
-            (c) => c is Map && c['id'] == control.id,
-            orElse: () => <String, dynamic>{},
-          ) as Map<String, dynamic>?;
-          // إذا كان النتيجة خريطة فارغة، اعتبرها null
-          if (payloadControl != null && payloadControl.isEmpty) {
-            payloadControl = null;
-          }
-        } catch (e) {
-          payloadControl = null;
-        }
-      }
-      
-      // الحصول على القيمة من payloadControl أو controlValue
-      dynamic value;
-      if (payloadControl != null && payloadControl['value'] != null) {
-        value = payloadControl['value'];
-      } else if (controlValue != null) {
-        value = controlValue;
-      } else {
-        value = control.value;
-      }
-      
-      // استخراج Cvalue من القيمة
-      String? cvalue = _extractCvalueFromValue(value, control);
-      
-      // استخراج folders و files من القيمة
-      List<dynamic>? folders = _extractFoldersFromValue(value);
-      List<dynamic>? files = _extractFilesFromValue(value);
-      
-      // إضافة حقول control إلى كل file في files array (مطلوبة للـ Worker)
-      // هذه الحقول تأتي من control وليس من file نفسه
-      if (files != null && files.isNotEmpty && control.type == 7) {
-        // استخدام القيم من control (سيتم تعيينها لاحقاً في fullControl)
-        final parentPathT = '0'; // من control - سيتم استخدامه في Worker
-        
-        for (final file in files) {
-          if (file is Map<String, dynamic>) {
-            // إضافة/تحديث حقول control إلى file
-            // Worker يحتاج هذه الحقول في file object
-            // إذا كانت موجودة في file، نستخدمها، وإلا نستخدم القيم من control
-            if (!file.containsKey('parent_path_t') || file['parent_path_t'] == null) {
-              file['parent_path_t'] = parentPathT;
-            }
-            // path_t يجب أن يكون بناءً على parent_path_t و row_num
-            if (!file.containsKey('path_t') || file['path_t'] == null) {
-              final rowNum = file['row_num'] ?? 0;
-              file['path_t'] = '$parentPathT.$rowNum';
-            }
-          }
-        }
-      }
-      
-      // استخراج fkappid, fksys, fktpth, connected_type, sel_val من meta والقيمة
-      int? fkappid;
-      int? fksys;
-      String? fktpth;
-      String? connectedType;
-      String? selVal;
-      
-      // إذا كانت القيمة خريطة تحتوي على fkappid (مثل c501)
-      if (value is Map<String, dynamic>) {
-        if (value.containsKey('c501')) {
-          fkappid = value['c501'] as int?;
-        }
-      }
-      
-      // استخراج من meta إذا كان control من نوع 16 (أداة ربط)
-      if (control.type == 16 && control.meta != null) {
-        final connectedMeta = control.meta!['connected'];
-        if (connectedMeta is Map) {
-          // استخراج table_id كـ fkappid
-          if (connectedMeta.containsKey('table_id')) {
-            fkappid = connectedMeta['table_id'] as int?;
-          }
-          
-          // استخراج connected_type
-          if (connectedMeta.containsKey('connected_type')) {
-            connectedType = connectedMeta['connected_type'] as String?;
-          } else {
-            // إذا لم يكن موجوداً، استخدم 'ventry' كقيمة افتراضية
-            connectedType = 'ventry';
-          }
-          
-          // sel_val هو نفس Cvalue إذا كان Cvalue موجوداً وغير فارغ
-          if (cvalue != null && cvalue.isNotEmpty) {
-            selVal = cvalue;
-          }
-        }
-      }
-      
-      // بناء control كامل (مثل ControlModel.toMap())
-      final Map<String, dynamic> fullControl = {
-        'child_of': 0,
-        'auto': 1,
-        'start_num': 0,
-        'pre_num': 0,
-        'id_in_code': control.id,
-        'en_name': 'c${control.id}',
-        'dateformatt': control.dateType ?? 'date',
-        'f_id': formStructure.id,
-        'name': control.name,
-        'type': control.type,
-        'Cvalue': cvalue,
-        'parent_rowno': 0,
-        'rowno': 0,
-        'path_t': '0',
-        'parent_path_t': '0',
-        'adder': null,
-        'ext': null,
-        'folders': folders,
-        'files': files,
-        'filename': null,
-        'fksys': fksys,
-        'fkappid': fkappid,
-        'fktpth': fktpth,
-        'connected_type': connectedType,
-        'sel_val': selVal ?? cvalue,
-        'idd': 0,
-        'level': 0,
-        'auto_level': 0,
-        'staticc': 1,
-        'fk_cons': null,
-        'called_columns': null,
-      };
-      
-      controls.add(fullControl);
-    }
-    
-    // بناء JSON الكامل (مثل ConvertFormToJson_insert_begin)
-    // استخدام البيانات الحقيقية من completePayload إذا كانت موجودة، وإلا استخدام القيم الافتراضية
-    final Map<String, dynamic> workerJson = {
-      'controls': controls,
-      'id': completePayload['id']?.toString() ?? Funcs.form_id?.toString() ?? formStructure.id.toString(),
-      'inserttype': completePayload['inserttype'] ?? 'begin',
-      'appid': completePayload['appid'] ?? 0,
-      'objid': completePayload['objid'] ?? 0,
-      'selid': completePayload['selid'] ?? formStructure.id,
-      'notes': completePayload['notes'] ?? 'null',
-      'f_id': completePayload['f_id'] ?? formStructure.id,
-      'w_id': completePayload['w_id'] ?? 0,
-      'approvalid': completePayload['approvalid'] ?? 0,
-      'table_name': completePayload['table_name'] ?? 'entry',
-      'ref_id': completePayload['ref_id'] ?? formStructure.id,
-      'edit': completePayload['edit'] ?? 0,
-      'master_id': completePayload['master_id'] ?? 0,
-      'f_or_e': completePayload['f_or_e'] ?? 1,
-      'big_id': completePayload['big_id'] ?? 0,
-      'select_or': completePayload['select_or'],
-      'parent_flow_obj_id': completePayload['parent_flow_obj_id'] ?? 0,
-      'notifs': completePayload['notifs'],
-      'reqs': completePayload['reqs'],
-      'selected_obj': completePayload['selected_obj'],
-    };
-    
-    return workerJson;
-  }
-
-  /// استخراج Cvalue من القيمة (مثل ControlModel.toMap())
-  String? _extractCvalueFromValue(dynamic value, ControlModel control) {
-    if (value == null) return null;
-    
-    if (control.type == 16) {
-      // أداة ربط - Cvalue هو القيمة الأولى من الخريطة (غير null)
-      // في التطبيق الأساسي، Cvalue يأتي من control.Cvalue مباشرة
-      if (value is Map<String, dynamic> && value.isNotEmpty) {
-        // البحث عن أول قيمة غير null (مثل c2 أو CLAIM_ID)
-        // نبحث عن قيمة نصية أولاً
-        for (final entry in value.entries) {
-          if (entry.value != null && entry.value is String) {
-            return entry.value.toString();
-          }
-        }
-        // إذا لم نجد نصية، نأخذ أول قيمة غير null
-        for (final v in value.values) {
-          if (v != null) {
-            return v.toString();
-          }
-        }
-      }
-    } else if (value is Map<String, dynamic>) {
-      // إذا كانت القيمة خريطة، نبحث عن قيمة نصية (مثل c2)
-      if (value.containsKey('c2')) {
-        return value['c2']?.toString();
-      }
-      // البحث عن أول قيمة نصية غير null
-      for (final v in value.values) {
-        if (v != null && v is String) {
-          return v;
-        }
-      }
-    } else {
-      return value.toString();
-    }
-    
-    return null;
-  }
-
-  /// استخراج folders من القيمة
-  List<dynamic>? _extractFoldersFromValue(dynamic value) {
-    if (value is Map<String, dynamic>) {
-      final folders = value['folders'];
-      if (folders is List) {
-        return folders;
-      }
-    }
-    return null;
-  }
-
-  /// استخراج files من القيمة
-  List<dynamic>? _extractFilesFromValue(dynamic value) {
-    if (value is Map<String, dynamic>) {
-      final files = value['files'];
-      if (files is List) {
-        return files;
-      }
-    }
-    return null;
-  }
-
-//   /// ## دالة اختبار الاتصال بخادم MinIO
-//   ///
-//   /// هذه الدالة تختبر الاتصال الأساسي بخادم MinIO
-//   /// وتتحقق من صحة بيانات الاعتماد وإمكانية الوصول للـ Bucket
-//   ///
-//   /// @return String رسالة توضح حالة الاتصال
   Future<String> testConnection() async {
     try {
       print('🔄 بدء اختبار الاتصال بخادم MinIO...');
