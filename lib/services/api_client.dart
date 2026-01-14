@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import 'package:useshareflowpublicapiflutter/help/funcs.dart';
 import 'package:useshareflowpublicapiflutter/help/log.dart';
 import '../config.dart';
@@ -14,8 +16,8 @@ class ApiClient {
     'Content-Type': 'application/json; charset=utf-8',
     'API-KEY': AppConfig.apiKey,
     'password': AppConfig.password,
-    'phone-user': AppConfig.username, 
-    'user-key': AppConfig.licenseKey, 
+    'phone-user': AppConfig.username,
+    'user-key': AppConfig.licenseKey,
   };
 
   Uri _uri(String path, [Map<String, String>? query]) {
@@ -32,14 +34,18 @@ class ApiClient {
       final res = await http
           .get(uri, headers: _headers)
           .timeout(AppConfig.httpTimeout);
-          print('res.body: ${res.body}');
+      print('res.body: ${res.body}');
       await LogServices.write('[ApiClient] Response Status: ${res.statusCode}');
       if (res.statusCode == 200) {
         final List<dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
-        await LogServices.write('[ApiClient] ✅ تم جلب النماذج بنجاح - العدد: ${data.length}');
+        await LogServices.write(
+          '[ApiClient] ✅ تم جلب النماذج بنجاح - العدد: ${data.length}',
+        );
         return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
       }
-      await LogServices.write('[ApiClient] ❌ فشل جلب النماذج - Status: ${res.statusCode}');
+      await LogServices.write(
+        '[ApiClient] ❌ فشل جلب النماذج - Status: ${res.statusCode}',
+      );
       throw Exception('فشل جلب النماذج (${res.statusCode})');
     } catch (e) {
       await LogServices.write('[ApiClient] ❌ Exception في fetchForms: $e');
@@ -48,7 +54,9 @@ class ApiClient {
   }
 
   Future<FormStructureModel> fetchFormStructure(int formId) async {
-    await LogServices.write('[ApiClient] بدء جلب هيكل النموذج - form_id: $formId');
+    await LogServices.write(
+      '[ApiClient] بدء جلب هيكل النموذج - form_id: $formId',
+    );
     try {
       final uri = _uri('api/Bring_TheControls_Of_Released_EntryForm', {
         'form_id': formId.toString(),
@@ -58,20 +66,31 @@ class ApiClient {
       final res = await http
           .get(uri, headers: _headers)
           .timeout(AppConfig.httpTimeout);
-      await LogServices.write('[ApiClient]fetch Form Structure Response Body: ${res.statusCode}');
+      await LogServices.write(
+        '[ApiClient]fetch Form Structure Response Body: ${res.statusCode}',
+      );
+
       print('res.body: ${res.body}');
       if (res.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
+        final Map<String, dynamic> data = jsonDecode(
+          utf8.decode(res.bodyBytes),
+        );
         final result = FormStructureModel.fromJson(data);
         Funcs.form_model = result;
         Funcs.form_id = result.id;
-        await LogServices.write('[ApiClient] ✅ تم جلب هيكل النموذج بنجاح - form_id: ${result.id}, عدد الأدوات: ${result.controls.length}');
+        await LogServices.write(
+          '[ApiClient] ✅ تم جلب هيكل النموذج بنجاح - form_id: ${result.id}, عدد الأدوات: ${result.controls.length}',
+        );
         return result;
       }
-      await LogServices.write('[ApiClient] ❌ فشل جلب هيكل النموذج - Status: ${res.statusCode}');
+      await LogServices.write(
+        '[ApiClient] ❌ فشل جلب هيكل النموذج - Status: ${res.statusCode}',
+      );
       throw Exception('فشل جلب هيكل النموذج (${res.statusCode})');
     } catch (e) {
-      await LogServices.write('[ApiClient] ❌ Exception في fetchFormStructure: $e');
+      await LogServices.write(
+        '[ApiClient] ❌ Exception في fetchFormStructure: $e',
+      );
       throw Exception('فشل جلب هيكل النموذج: $e');
     }
   }
@@ -89,9 +108,13 @@ class ApiClient {
           .get(uri, headers: _headers)
           .timeout(AppConfig.httpTimeout);
 
-      await LogServices.write('[ApiClient] GetConnectedOptions Response Status: ${res.statusCode}');
+      await LogServices.write(
+        '[ApiClient] GetConnectedOptions Response Status: ${res.statusCode}',
+      );
       if (res.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
+        final Map<String, dynamic> data = jsonDecode(
+          utf8.decode(res.bodyBytes),
+        );
 
         try {
           final rawList = data['data'];
@@ -100,22 +123,34 @@ class ApiClient {
                 .whereType<Map>()
                 .map((e) => Map<String, dynamic>.from(e))
                 .toList();
-                await LogServices.write('[ApiClient] GetConnectedOptions Response Data: $items');
+            await LogServices.write(
+              '[ApiClient] GetConnectedOptions Response Data: $items',
+            );
           }
           if (items.isNotEmpty) {
-            await LogServices.write('[ApiClient] ✅ تم جلب خيارات أداة الربط - العدد: ${items.length}');
+            await LogServices.write(
+              '[ApiClient] ✅ تم جلب خيارات أداة الربط - العدد: ${items.length}',
+            );
           } else {
-            await LogServices.write('[ApiClient] ⚠️ قائمة خيارات أداة الربط فارغة');
+            await LogServices.write(
+              '[ApiClient] ⚠️ قائمة خيارات أداة الربط فارغة',
+            );
           }
         } catch (e) {
-          await LogServices.write('[ApiClient] ❌ خطأ في تحليل خيارات أداة الربط: $e');
+          await LogServices.write(
+            '[ApiClient] ❌ خطأ في تحليل خيارات أداة الربط: $e',
+          );
         }
         return items;
       }
-      await LogServices.write('[ApiClient] ❌ فشل جلب خيارات أداة الربط - Status: ${res.statusCode}');
+      await LogServices.write(
+        '[ApiClient] ❌ فشل جلب خيارات أداة الربط - Status: ${res.statusCode}',
+      );
       throw Exception('فشل جلب خيارات أداة الربط (${res.statusCode})');
     } catch (e) {
-      await LogServices.write('[ApiClient] ❌ Exception في getConnectedOptions: $e');
+      await LogServices.write(
+        '[ApiClient] ❌ Exception في getConnectedOptions: $e',
+      );
       throw Exception('فشل جلب خيارات أداة الربط: $e');
     }
   }
@@ -128,13 +163,20 @@ class ApiClient {
       final res = await http
           .get(uri, headers: _headers)
           .timeout(AppConfig.httpTimeout);
-      await LogServices.write('[ApiClient] getDataForm Response Status: ${res.statusCode}');
+      await LogServices.write(
+        '[ApiClient] getDataForm Response Status: ${res.statusCode}',
+      );
       if (res.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
+        final Map<String, dynamic> data = jsonDecode(
+          utf8.decode(res.bodyBytes),
+        );
+
         await LogServices.write('[ApiClient] ✅ تم جلب بيانات النموذج بنجاح');
         return data;
       }
-      await LogServices.write('[ApiClient] ❌ فشل جلب البيانات - Status: ${res.statusCode}');
+      await LogServices.write(
+        '[ApiClient] ❌ فشل جلب البيانات - Status: ${res.statusCode}',
+      );
       throw Exception('فشل جلب البيانات (${res.statusCode})');
     } catch (e) {
       await LogServices.write('[ApiClient] ❌ Exception في getDataForm: $e');
@@ -149,19 +191,28 @@ class ApiClient {
       final uri = _uri(AppConfig.submitFormEndpoint);
       // await LogServices.write('[ApiClient] URI: $uri');
       // await LogServices.write('[ApiClient] payload: $payload');
+
       final res = await http
           .post(uri, body: jsonEncode(payload), headers: _headers)
           .timeout(AppConfig.httpTimeout);
 
       final sanitizedBody = Funcs.sanitizeResponse(res.body);
-      await LogServices.write('[ApiClient] submitForm Response Status: ${res.statusCode}');
+      await LogServices.write(
+        '[ApiClient] submitForm Response Status: ${res.statusCode}',
+      );
 
       if (res.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
-        await LogServices.write('[ApiClient] ✅ تم إرسال النموذج بنجاح');
+        final Map<String, dynamic> data = jsonDecode(
+          utf8.decode(res.bodyBytes),
+        );
+        // final jsonString = jsonEncode(data);
+        // final file = await FileHelper.writeFile('SubmitForm.json', jsonString);
+        // await LogServices.write('[ApiClient] ✅ تم إرسال النموذج بنجاح');
         return data;
       }
-      await LogServices.write('[ApiClient] ❌ فشل إرسال النموذج - Status: ${res.body}');
+      await LogServices.write(
+        '[ApiClient] ❌ فشل إرسال النموذج - Status: ${res.body}',
+      );
       throw Exception('فشل إرسال النموذج (${res.statusCode})');
     } catch (e) {
       await LogServices.write('[ApiClient] ❌ Exception في submitForm: $e');
@@ -171,7 +222,9 @@ class ApiClient {
 
   /// التحقق من حالة المهمة باستخدام task_id أو correlation_id
   Future<String> checkTaskStatus(String taskId, {String? accessToken}) async {
-    await LogServices.write('[ApiClient] بدء التحقق من حالة المهمة - task_id: $taskId');
+    await LogServices.write(
+      '[ApiClient] بدء التحقق من حالة المهمة - task_id: $taskId',
+    );
     try {
       final uri = _uri('and_sch/check_task_status', {'task_id': taskId});
 
@@ -191,20 +244,30 @@ class ApiClient {
           .timeout(AppConfig.httpTimeout);
 
       final sanitizedBody = Funcs.sanitizeResponse(res.body);
-      await LogServices.write('[ApiClient] checkTaskStatus Response Status: ${res.statusCode} - task_id: $taskId');
+      await LogServices.write(
+        '[ApiClient] checkTaskStatus Response Status: ${res.statusCode} - task_id: $taskId',
+      );
 
       if (res.statusCode == 200) {
-        await LogServices.write('[ApiClient] ✅ تم التحقق من حالة المهمة بنجاح - task_id: $taskId');
+        await LogServices.write(
+          '[ApiClient] ✅ تم التحقق من حالة المهمة بنجاح - task_id: $taskId',
+        );
         return utf8.decode(res.bodyBytes);
       }
       if (res.statusCode == 401) {
-        await LogServices.write('[ApiClient] ❌ access token منتهي الصلاحية - task_id: $taskId');
+        await LogServices.write(
+          '[ApiClient] ❌ access token منتهي الصلاحية - task_id: $taskId',
+        );
         throw Exception('Unauthorized: access token منتهي الصلاحية');
       }
-      await LogServices.write('[ApiClient] ❌ فشل التحقق من حالة المهمة - Status: ${res.body}, task_id: $taskId');
+      await LogServices.write(
+        '[ApiClient] ❌ فشل التحقق من حالة المهمة - Status: ${res.body}, task_id: $taskId',
+      );
       throw Exception('فشل التحقق من حالة المهمة (${res.statusCode})');
     } catch (e) {
-      await LogServices.write('[ApiClient] ❌ Exception في checkTaskStatus - task_id: $taskId, الخطأ: $e');
+      await LogServices.write(
+        '[ApiClient] ❌ Exception في checkTaskStatus - task_id: $taskId, الخطأ: $e',
+      );
       throw Exception('خطأ في التحقق من حالة المهمة: ${e.toString()}');
     }
   }
@@ -213,77 +276,100 @@ class ApiClient {
   Future<Map<String, dynamic>> refreshAccessToken(String refreshToken) async {
     await LogServices.write('[ApiClient] بدء تجديد access token');
     try {
-      final uri = _uri('pro_local/rerefresh'); 
+      final uri = _uri('pro_local/rerefresh');
       final body = jsonEncode({'refresh_token': refreshToken});
-      
+
       final res = await http
           .post(uri, body: body, headers: _headers)
           .timeout(AppConfig.httpTimeout);
-      
+
       final sanitizedBody = Funcs.sanitizeResponse(res.body);
-      await LogServices.write('[ApiClient] refreshAccessToken Response Status: ${res.statusCode} - Body: $sanitizedBody');
+      await LogServices.write(
+        '[ApiClient] refreshAccessToken Response Status: ${res.statusCode} - Body: $sanitizedBody',
+      );
 
       if (res.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
+        final Map<String, dynamic> data = jsonDecode(
+          utf8.decode(res.bodyBytes),
+        );
         // await LogServices.write('[ApiClient] ✅ تم تجديد access token بنجاح');
         return data;
       }
-      await LogServices.write('[ApiClient] ❌ فشل تجديد access token - Status: ${res.body}');
+      await LogServices.write(
+        '[ApiClient] ❌ فشل تجديد access token - Status: ${res.body}',
+      );
       throw Exception('فشل تجديد access token (${res.statusCode})');
     } catch (e) {
-      await LogServices.write('[ApiClient] ❌ Exception في refreshAccessToken: $e');
+      await LogServices.write(
+        '[ApiClient] ❌ Exception في refreshAccessToken: $e',
+      );
       throw Exception('خطأ في تجديد access token: $e');
     }
   }
 
   Future<Map<String, dynamic>> getFirstMatch({
-  required int formId,
-  required int controlId,
-  required String value,
-  String? colName,
-}) async {
-  await LogServices.write('[ApiClient] بدء البحث عن أول تطابق - form_id: $formId, control_id: $controlId, value: $value');
-  try {
-    final uri = _uri(
-      'api/GetFirstMatch',
-       {
+    required int formId,
+    required int controlId,
+    required String value,
+    String? colName,
+  }) async {
+    await LogServices.write(
+      '[ApiClient] بدء البحث عن أول تطابق - form_id: $formId, control_id: $controlId, value: $value',
+    );
+    try {
+      final uri = _uri('api/GetFirstMatch', {
         'form_id': formId.toString(),
         'control_id': controlId.toString(),
-        'value': '%$value%',           
+        'value': '%$value%',
         if (colName != null && colName.isNotEmpty) 'col_name': colName,
-      },
-    );
+      });
 
-    // POST بدون body (يكفي الهيدر)
-    final res = await http.post(uri, headers: _headers).timeout(AppConfig.httpTimeout);
+      // POST بدون body (يكفي الهيدر)
+      final res = await http
+          .post(uri, headers: _headers)
+          .timeout(AppConfig.httpTimeout);
 
-    // final sanitizedBody = Funcs.sanitizeResponse(res.body);
-    await LogServices.write('[ApiClient] getFirstMatch Response Status: ${res.statusCode}');
+      // final sanitizedBody = Funcs.sanitizeResponse(res.body);
+      await LogServices.write(
+        '[ApiClient] getFirstMatch Response Status: ${res.statusCode}',
+      );
 
-    if (res.statusCode == 200) {
-      await LogServices.write('[ApiClient] ✅ تم العثور على تطابق بنجاح - form_id: $formId, control_id: $controlId');
-      return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      if (res.statusCode == 200) {
+        await LogServices.write(
+          '[ApiClient] ✅ تم العثور على تطابق بنجاح - form_id: $formId, control_id: $controlId',
+        );
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
+      if (res.statusCode == 400) {
+        final errorData = jsonDecode(res.body);
+        await LogServices.write(
+          '[ApiClient] ❌ خطأ 400 في البحث - form_id: $formId, الخطأ: ${errorData['error'] ?? 'خطأ في البحث'}',
+        );
+        throw Exception(errorData['error'] ?? 'خطأ في البحث');
+      }
+      if (res.statusCode == 401) {
+        await LogServices.write(
+          '[ApiClient] ❌ خطأ 401 - API KEY غير صالح - form_id: $formId',
+        );
+        throw Exception('API KEY غير صالح');
+      }
+      if (res.statusCode == 404) {
+        await LogServices.write(
+          '[ApiClient] ⚠️ لم يتم العثور على تطابق - form_id: $formId, control_id: $controlId, value: $value',
+        );
+        throw Exception('لم يتم العثور على تطابق');
+      }
+      await LogServices.write(
+        '[ApiClient] ❌ فشل البحث عن تطابق - Status: ${res.body}, form_id: $formId',
+      );
+      Funcs.errors.add('فشل البحث عن تطابق (${res.statusCode})');
+      await Funcs.checkRepeatingErrors();
+      throw Exception('فشل البحث عن تطابق (${res.statusCode})');
+    } catch (e) {
+      await LogServices.write(
+        '[ApiClient] ❌ Exception في getFirstMatch - form_id: $formId, control_id: $controlId, الخطأ: $e',
+      );
+      throw Exception('خطأ في البحث عن تطابق: $e');
     }
-    if (res.statusCode == 400) {
-      final errorData = jsonDecode(res.body);
-      await LogServices.write('[ApiClient] ❌ خطأ 400 في البحث - form_id: $formId, الخطأ: ${errorData['error'] ?? 'خطأ في البحث'}');
-      throw Exception(errorData['error'] ?? 'خطأ في البحث');
-    }
-    if (res.statusCode == 401) {
-      await LogServices.write('[ApiClient] ❌ خطأ 401 - API KEY غير صالح - form_id: $formId');
-      throw Exception('API KEY غير صالح');
-    }
-    if (res.statusCode == 404) {
-      await LogServices.write('[ApiClient] ⚠️ لم يتم العثور على تطابق - form_id: $formId, control_id: $controlId, value: $value');
-      throw Exception('لم يتم العثور على تطابق');
-    }
-    await LogServices.write('[ApiClient] ❌ فشل البحث عن تطابق - Status: ${res.body}, form_id: $formId');
-    Funcs.errors.add('فشل البحث عن تطابق (${res.statusCode})');
-    await Funcs.checkRepeatingErrors();
-    throw Exception('فشل البحث عن تطابق (${res.statusCode})');
-  } catch (e) {
-    await LogServices.write('[ApiClient] ❌ Exception في getFirstMatch - form_id: $formId, control_id: $controlId, الخطأ: $e');
-    throw Exception('خطأ في البحث عن تطابق: $e');
   }
-}
 }

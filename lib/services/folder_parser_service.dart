@@ -1,27 +1,43 @@
 import '../models/folder_parsing_models.dart';
 
-/// Service for parsing folder names according to the pattern:
-/// Pattern: XX + (XX-XXXX) + (T?) + (1-99999+) + (YYYY)
-/// 
+/// Service for parsing folder names according to multiple patterns:
+///
+/// Pattern 1 (Currency): (USD|YER|SAR) + (T?) + (1-99999+) + (YYYY)
+/// Examples:
+/// - USD12342020 → SA/USD/1234/2020
+/// - USDT12342023 → SA/USD/T/1234/2023
+/// - YER12342020 → SA/YER/1234/2020
+/// - SART12342023 → SA/SAR/T/1234/2023
+///
+/// Pattern 2 (Standard): XX + (XX-XXXX) + (T?) + (1-99999+) + (YYYY)
 /// Examples:
 /// - SAPMT12342025 → SA/PM/T/1234/2025
 /// - SAPM12342025 → SA/PM/1234/2025
 /// - IBBPMT12342025 → IBB/PM/T/1234/2025 (IBB is special 3-letter prefix)
-/// 
+///
 /// Important:
 /// - T is a FLAG, not part of section
 /// - T flag only recognized when followed by a digit
 /// - IBB is the only city with 3-letter prefix
+/// - Currency pattern is checked first, then standard pattern
 class FolderParserService {
-  /// Attempts to parse a folder name according to the pattern
-  /// Returns null if the name doesn't match the pattern
-  /// 
+  /// Attempts to parse a folder name according to the patterns
+  /// Returns null if the name doesn't match any pattern
+  ///
   /// Special cases:
+  /// - Currency pattern (USD/YER/SAR) is checked first
   /// - IBB is the only city with 3-letter prefix
   /// - T is a flag, not part of section
-  ParsedFolderName? parseFolderName(String folderName,{String? department}) {
+  ParsedFolderName? parseFolderName(String folderName, {String? department}) {
+    // First, try currency pattern (USD/YER/SAR)
+    final currencyResult = _parseCurrencyPattern(folderName);
+    if (currencyResult != null) {
+      return currencyResult;
+    }
+
+    // If currency pattern doesn't match, try standard pattern
     try {
-      // Validate minimum length
+      // Validate minimum length for standard pattern
       if (folderName.length < 9) {
         // Minimum: XX + XX + 1 + YYYY = 9 chars
         return null;
@@ -50,8 +66,8 @@ class FolderParserService {
         final char = folderName[position + i];
         if (_isLetter(char)) {
           // Check if this might be the T flag (T followed by digit)
-          if (char == 'T' && 
-              position + i + 1 < folderName.length && 
+          if (char == 'T' &&
+              position + i + 1 < folderName.length &&
               _isDigit(folderName[position + i + 1])) {
             // This is likely the T flag, stop here
             break;
@@ -68,7 +84,7 @@ class FolderParserService {
 
       // 3. Check for optional 'T' flag (only if followed by a digit)
       String? tFlag;
-      if (position < folderName.length && 
+      if (position < folderName.length &&
           folderName[position] == 'T' &&
           position + 1 < folderName.length &&
           _isDigit(folderName[position + 1])) {
@@ -117,6 +133,84 @@ class FolderParserService {
     }
   }
 
+  /// Parses folder name according to currency pattern:
+  /// (USD|YER|SAR) + (T?) + (digits) + (YYYY)
+  /// Returns null if the name doesn't match this pattern
+  ParsedFolderName? _parseCurrencyPattern(String folderName) {
+    try {
+      // Validate minimum length: USD + 1 digit + YYYY = 8 chars minimum
+      if (folderName.length < 8) {
+        return null;
+      }
+
+      // Check if starts with USD, YER, or SAR
+      String? currencyPrefix;
+      int position = 0;
+
+      if (folderName.startsWith('USD')) {
+        currencyPrefix = 'USD';
+        position = 3;
+      } else if (folderName.startsWith('YER')) {
+        currencyPrefix = 'YER';
+        position = 3;
+      } else if (folderName.startsWith('SAR')) {
+        currencyPrefix = 'SAR';
+        position = 3;
+      } else {
+        // Doesn't match currency pattern
+        return null;
+      }
+
+      // Check for optional 'T' flag (only if followed by a digit)
+      String? tFlag;
+      if (position < folderName.length &&
+          folderName[position] == 'T' &&
+          position + 1 < folderName.length &&
+          _isDigit(folderName[position + 1])) {
+        tFlag = 'T';
+        position++;
+      }
+
+      // Extract number and year
+      // We need at least 5 characters left (1 digit + 4 for year)
+      if (folderName.length - position < 5) {
+        return null;
+      }
+
+      // Find where the year starts (last 4 characters should be year)
+      final yearStartPos = folderName.length - 4;
+      final year = folderName.substring(yearStartPos);
+
+      // Validate year is 4 digits
+      if (!_isAllDigits(year)) return null;
+
+      // Extract number (everything between current position and year)
+      final number = folderName.substring(position, yearStartPos);
+
+      // Validate number contains only digits and is not empty
+      if (number.isEmpty || !_isAllDigits(number)) return null;
+
+      // Build formatted string
+      final parts = <String>['SA', currencyPrefix];
+      if (tFlag != null) parts.add(tFlag);
+      parts.addAll([number, year]);
+      final formatted = parts.join('/');
+
+      return ParsedFolderName(
+        prefix: currencyPrefix,
+        section: '', // Empty section for currency pattern
+        tFlag: tFlag,
+        number: number,
+        year: year,
+        formatted: formatted,
+        originalName: folderName,
+      );
+    } catch (e) {
+      // If any error occurs during parsing, return null
+      return null;
+    }
+  }
+
   /// Checks if a string contains only letters
   bool _isAllLetters(String str) {
     if (str.isEmpty) return false;
@@ -141,15 +235,27 @@ class FolderParserService {
 
   /// Validates that a parsed result makes sense
   bool validateParsedName(ParsedFolderName parsed) {
-    // Prefix should be 2 letters (or 3 for IBB)
-    if (parsed.prefix == 'IBB') {
-      if (parsed.prefix.length != 3) return false;
-    } else {
-      if (parsed.prefix.length != 2) return false;
-    }
+    // Check if it's a currency pattern (USD, YER, SAR)
+    final isCurrencyPattern =
+        parsed.prefix == 'USD' ||
+        parsed.prefix == 'YER' ||
+        parsed.prefix == 'SAR';
 
-    // Section should be 2-4 letters
-    if (parsed.section.length < 2 || parsed.section.length > 4) return false;
+    if (isCurrencyPattern) {
+      // Currency pattern: prefix should be 3 letters (USD/YER/SAR)
+      if (parsed.prefix.length != 3) return false;
+      // Section should be empty for currency pattern
+      if (parsed.section.isNotEmpty) return false;
+    } else {
+      // Standard pattern: prefix should be 2 letters (or 3 for IBB)
+      if (parsed.prefix == 'IBB') {
+        if (parsed.prefix.length != 3) return false;
+      } else {
+        if (parsed.prefix.length != 2) return false;
+      }
+      // Section should be 2-4 letters for standard pattern
+      if (parsed.section.length < 2 || parsed.section.length > 4) return false;
+    }
 
     // Year should be 4 digits
     if (parsed.year.length != 4) return false;
@@ -160,14 +266,6 @@ class FolderParserService {
     return true;
   }
 }
-
-
-
-
-
-
-
-
 
 // import '../models/folder_parsing_models.dart';
 

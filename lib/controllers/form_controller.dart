@@ -423,10 +423,7 @@ class FormController extends GetxController {
     }).toList();
 
     // بناء payload مؤقت (بدون foldername) لتمريره إلى uploadFormFilesToMinIOValues
-    final tempPayload = {
-      'id': form.id,
-      'controls': cleanedControls,
-    };
+    final tempPayload = {'id': form.id, 'controls': cleanedControls};
 
     // تمرير values و payload الكامل إلى uploadFormFilesToMinIOValues
     // (تعدل base64/path وتضيف foldername وترفع JSON الكامل)
@@ -468,7 +465,7 @@ class FormController extends GetxController {
     final result = <Map<String, dynamic>>[];
 
     for (final control in controls) {
-      if(control.type == 5){
+      if (control.type == 5) {
         result.add(_buildDateControlForSubmit(control));
       }
       if (control.type == 8) {
@@ -497,11 +494,9 @@ class FormController extends GetxController {
   Map<String, dynamic> _buildDateControlForSubmit(ControlModel dateControl) {
     final dateValue = values[dateControl.id];
     final dateFormat = DateFormat('yyyy-MM-dd HH:mm:ss').format(dateValue);
-    return {
-      'id': dateControl.id,
-      'value': dateFormat,
-    };
+    return {'id': dateControl.id, 'value': dateFormat};
   }
+
   /// بناء أداة جدول للإرسال
   Map<String, dynamic> _buildTableControlForSubmit(ControlModel tableControl) {
     final rows = <Map<String, dynamic>>[];
@@ -592,13 +587,22 @@ class FormController extends GetxController {
       }
     } catch (e) {
       print('❌ خطأ في الإرسال: $e');
-      Get.snackbar(
-        'خطأ في الإرسال',
-        e.toString(),
-        backgroundColor: Colors.red.withOpacity(0.8),
-        colorText: Colors.white,
-        duration: const Duration(seconds: 5),
-      );
+      if (Get.context != null) {
+        try {
+          Get.snackbar(
+            'خطأ في الإرسال',
+            e.toString(),
+            backgroundColor: Colors.red.withOpacity(0.8),
+            colorText: Colors.white,
+            duration: const Duration(seconds: 5),
+          );
+        } catch (_) {
+          // Fallback if Get.snackbar fails (e.g. no overlay)
+          print('Could not show snackbar. Error: $e');
+        }
+      } else {
+        print('No context available. Error: $e');
+      }
     } finally {
       isSubmitting.value = false;
     }

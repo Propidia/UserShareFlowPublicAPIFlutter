@@ -180,6 +180,39 @@ void main() {
       expect(result, isNotNull);
       expect(parserService.validateParsedName(result!), isTrue);
     });
+
+    // Patterns for Currency (USD, YER, SAR)
+    test('Parse Currency Pattern USD -> SA/USD', () {
+      final result = parserService.parseFolderName('USD12342020');
+      expect(result, isNotNull);
+      expect(result!.prefix, equals('USD'));
+      expect(result.formatted, equals('SA/USD/1234/2020'));
+      expect(parserService.validateParsedName(result), isTrue);
+    });
+
+    test('Parse Currency Pattern YER -> SA/YER', () {
+      final result = parserService.parseFolderName('YER12342020');
+      expect(result, isNotNull);
+      expect(result!.prefix, equals('YER'));
+      expect(result.formatted, equals('SA/YER/1234/2020'));
+      expect(parserService.validateParsedName(result), isTrue);
+    });
+
+    test('Parse Currency Pattern SAR -> SA/SAR', () {
+      final result = parserService.parseFolderName('SAR12342023');
+      expect(result, isNotNull);
+      expect(result!.prefix, equals('SAR'));
+      expect(result.formatted, equals('SA/SAR/1234/2023'));
+      expect(parserService.validateParsedName(result), isTrue);
+    });
+
+    test('Parse Currency Pattern USD with T flag -> SA/USD/T', () {
+      final result = parserService.parseFolderName('USDT12342023');
+      expect(result, isNotNull);
+      expect(result!.prefix, equals('USD'));
+      expect(result.tFlag, equals('T'));
+      expect(result.formatted, equals('SA/USD/T/1234/2023'));
+      expect(parserService.validateParsedName(result), isTrue);
+    });
   });
 }
-
